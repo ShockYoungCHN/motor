@@ -79,7 +79,7 @@ MetaManager::MetaManager() {
 
   // Using the first RNIC's first port
   RdmaCtrl::DevIdx idx;
-  idx.dev_id = 0;
+  idx.dev_id = 2;
   idx.port_id = 1;
 
   // Open device
