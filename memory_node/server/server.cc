@@ -49,7 +49,7 @@ void Server::InitRDMA() {
   RDMA_LOG(INFO) << "Start initializing RDMA...";
 
   rdma_ctrl = std::make_shared<RdmaCtrl>(server_node_id, local_port);
-  RdmaCtrl::DevIdx idx{.dev_id = 2, .port_id = 1};  // using the first RNIC's first port
+  RdmaCtrl::DevIdx idx{.dev_id = 4, .port_id = 1};  // using the first RNIC's first port
   rdma_ctrl->open_thread_local_device(idx);
   RDMA_ASSERT(rdma_ctrl->register_memory(SERVER_HASH_BUFF_ID, mem_region, data_size + delta_size, rdma_ctrl->get_device()) == true);
 
