@@ -9,7 +9,9 @@
     "reserve_GB": 192,
     "max_client_num_per_mn": 50,
     "per_thread_delta_size_MB": 50,
-    "workload": "smallbank"
+    "workload": "SmallBank",
+    "dev_id": 3,
+    "port_id": 1
   },
   "remote_compute_nodes": {
     "compute_node_ips": [

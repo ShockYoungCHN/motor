@@ -12,6 +12,8 @@ MetaManager::MetaManager() {
   auto local_node = json_config.get("local_compute_node");
   local_machine_id = (node_id_t)local_node.get("machine_id").get_int64();
   iso_level = local_node.get("iso_level").get_int64();
+  int dev_id = (int)local_node.get("dev_id").get_int64();
+  int port_id = (int)local_node.get("port_id").get_int64();
 
   auto mem_nodes = json_config.get("remote_mem_nodes");
   auto remote_ips = mem_nodes.get("remote_ips");                // Array
@@ -79,8 +81,8 @@ MetaManager::MetaManager() {
 
   // Using the first RNIC's first port
   RdmaCtrl::DevIdx idx;
-  idx.dev_id = 4;
-  idx.port_id = 1;
+  idx.dev_id = dev_id;
+  idx.port_id = port_id;
 
   // Open device
   opened_rnic = global_rdma_ctrl->open_device(idx);

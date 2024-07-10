@@ -79,7 +79,7 @@ class Server {
 
   void InitMem();
 
-  void InitRDMA();
+  void InitRDMA(int, int);
 
   void ConnectMN();
 
