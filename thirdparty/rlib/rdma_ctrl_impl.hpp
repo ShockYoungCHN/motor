@@ -378,6 +378,8 @@ class RdmaCtrl::RdmaCtrlImpl {
         //          SCS s;
         switch (arg.type) {
           case ConnArg::MR:
+            // != mrs_.end() means map contains the key;
+            // end() Returns an iterator referring to the past-the-end element in the map container.
             if (mrs_.find(arg.payload.mr.mr_id) != mrs_.end()) {
               memcpy((char*) (&(reply.payload.mr)),
                      (char*) (&(mrs_[arg.payload.mr.mr_id]->rattr)), sizeof(MemoryAttr));

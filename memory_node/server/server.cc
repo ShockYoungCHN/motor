@@ -408,6 +408,10 @@ void Server::SendHashMeta(char* hash_meta_buffer, size_t& total_meta_size) {
 
   size_t recv_ack_size = 100;
   char* recv_buf = (char*)malloc(recv_ack_size);
+  if (recv_buf == nullptr)
+  {
+    RDMA_LOG(ERR) << "malloc error";
+  }
   recv(from_client_socket, recv_buf, recv_ack_size, 0);
 
   if (strcmp(recv_buf, "[ACK]hash_meta_received_from_client") != 0) {
