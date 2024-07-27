@@ -15,6 +15,6 @@
     "num_item": 10000,
     "item_bkt_num": 10000,
     
-    "attempted_num": 50000
+    "attempted_num": 1000000
   }
 }
