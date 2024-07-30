@@ -186,7 +186,7 @@ void Handler::GenThreads(std::string bench_name) {
     /* Pin thread i to hardware thread i */
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
-    CPU_SET(i, &cpuset);
+    CPU_SET(2*i+1, &cpuset);
     int rc = pthread_setaffinity_np(thread_arr[i].native_handle(), sizeof(cpu_set_t), &cpuset);
     if (rc != 0) {
       RDMA_LOG(WARNING) << "Error calling pthread_setaffinity_np: " << rc;
