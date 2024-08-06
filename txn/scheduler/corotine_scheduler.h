@@ -18,7 +18,7 @@ class CoroutineScheduler {
   // The coro_num includes all the coroutines
   CoroutineScheduler(t_id_t thread_id, coro_id_t coro_num) {
     t_id = thread_id;
-    pending_qps = std::vector<RCQP*>(coro_num, nullptr);
+    pending_qps = std::vector<RCQP*>(MAX_REMOTE_NODE_NUM, nullptr);
     pending_counts = new int[coro_num];
     for (coro_id_t c = 0; c < coro_num; c++) {
       pending_counts[c] = 0;
@@ -87,6 +87,7 @@ class CoroutineScheduler {
  private:
   t_id_t t_id;
 
+  // node_id: RCQP*
   std::vector<RCQP*> pending_qps;
 
   // number of pending qps (i.e., the ack has not received) per coroutine
@@ -95,7 +96,10 @@ class CoroutineScheduler {
 
 ALWAYS_INLINE
 void CoroutineScheduler::AddPendingQP(coro_id_t coro_id, RCQP* qp) {
-  pending_qps[coro_id] = qp;
+  if (unlikely(pending_qps[qp->idx_.node_id] == nullptr)) {
+    pending_qps[qp->idx_.node_id] = qp;
+  }
+  pending_qps[qp->idx_.node_id]->low_watermark_++;
   pending_counts[coro_id] += 1;
 }
 
@@ -280,28 +284,28 @@ void CoroutineScheduler::AppendCoroutine(Coroutine* coro) {
 ALWAYS_INLINE
 void CoroutineScheduler::PollCompletion(t_id_t tid)
 {
-  std::vector<ibv_cq*> cqs(pending_qps.size(), nullptr);
+  int max_completions = 0;
   for (int i = 0; i < pending_qps.size(); i++) {
-    if (pending_counts[i] == 0) {
+    if (pending_qps[i] == nullptr || pending_qps[i]->low_watermark_ == 0)
       continue;
-    }
-    cqs[i] = pending_qps[i]->cq_;
+    max_completions += pending_qps[i]->low_watermark_;
   }
 
-  for (int i = 0; i < cqs.size(); i++) {
-    int max_completions = pending_counts[i];
-    if (max_completions == 0) {
+  for (int i = 0; i < pending_qps.size(); i++) {
+    if (pending_qps[i] == nullptr || pending_qps[i]->low_watermark_ == 0)
       continue;
-    }
-    struct ibv_wc wc[max_completions];
-    int poll_result = ibv_poll_cq(cqs[i], max_completions, wc);
+
+    ibv_wc wc[max_completions];
+    auto curr_cq = pending_qps[i]->cq_;
+    int poll_result = ibv_poll_cq(curr_cq, max_completions, wc);
     if (poll_result == 0) {
       continue;
     }
+    pending_qps[i]->low_watermark_ -= poll_result;
 
     for (int j = 0; j < poll_result; j++) {
       if (unlikely(wc[j].status != IBV_WC_SUCCESS)) {
-        TLOG(INFO, tid) << "Bad completion status: " << wc[j].status << " with error " << ibv_wc_status_str(wc[j].status) << ";@ node " << pending_qps[i]->idx_.node_id;
+        TLOG(INFO, tid) << "Bad completion status: " << wc[j].status << " with error " << ibv_wc_status_str(wc[j].status);
         if (wc[j].status != IBV_WC_RETRY_EXC_ERR) {
           TLOG(INFO, tid) << "completion status != IBV_WC_RETRY_EXC_ERR. abort()";
           abort();
@@ -309,7 +313,6 @@ void CoroutineScheduler::PollCompletion(t_id_t tid)
         continue;
       }
       auto coro_id = wc[j].wr_id;
-      assert(coro_id == i);
       assert(pending_counts[coro_id] > 0);
       pending_counts[coro_id] -= 1;
       if (pending_counts[coro_id] == 0) {
@@ -318,4 +321,3 @@ void CoroutineScheduler::PollCompletion(t_id_t tid)
     }
   }
 }
-
