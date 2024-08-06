@@ -18,6 +18,7 @@ class CoroutineScheduler {
   // The coro_num includes all the coroutines
   CoroutineScheduler(t_id_t thread_id, coro_id_t coro_num) {
     t_id = thread_id;
+    pending_qps = std::vector<RCQP*>(coro_num, nullptr);
     pending_counts = new int[coro_num];
     for (coro_id_t c = 0; c < coro_num; c++) {
       pending_counts[c] = 0;
@@ -86,7 +87,7 @@ class CoroutineScheduler {
  private:
   t_id_t t_id;
 
-  std::list<RCQP*> pending_qps;
+  std::vector<RCQP*> pending_qps;
 
   // number of pending qps (i.e., the ack has not received) per coroutine
   int* pending_counts;
@@ -94,7 +95,7 @@ class CoroutineScheduler {
 
 ALWAYS_INLINE
 void CoroutineScheduler::AddPendingQP(coro_id_t coro_id, RCQP* qp) {
-  pending_qps.push_back(qp);
+  pending_qps[coro_id] = qp;
   pending_counts[coro_id] += 1;
 }
 
@@ -244,7 +245,7 @@ void CoroutineScheduler::Yield(coro_yield_t& yield, coro_id_t cid) {
   if (unlikely(pending_counts[cid] == 0)) {
     return;
   }
-  // 1. Remove this coroutine from the yield-able coroutine list
+  // 1. Remove this coroutine from the yield-able (yield-able=ready to run) coroutine list
   Coroutine* coro = &coro_array[cid];
   assert(coro->is_wait_poll == false);
   Coroutine* next = coro->next_coro;
@@ -272,37 +273,49 @@ void CoroutineScheduler::AppendCoroutine(Coroutine* coro) {
   Coroutine* prev = coro_tail;
   prev->next_coro = coro;
   coro_tail = coro;
-  coro_tail->next_coro = coro_head;
+  coro_tail->next_coro = coro_head; // todo: don't u need to set coro_head->prev_coro = coro_tail?
   coro_tail->prev_coro = prev;
 }
 
 ALWAYS_INLINE
-void CoroutineScheduler::PollCompletion(t_id_t tid) {
-  for (auto it = pending_qps.begin(); it != pending_qps.end();) {
-    RCQP* qp = *it;
-    struct ibv_wc wc;
-    auto poll_result = qp->poll_send_completion(wc);  // The qp polls its own wc
-    if (poll_result == 0) {
-      it++;
+void CoroutineScheduler::PollCompletion(t_id_t tid)
+{
+  std::vector<ibv_cq*> cqs(pending_qps.size(), nullptr);
+  for (int i = 0; i < pending_qps.size(); i++) {
+    if (pending_counts[i] == 0) {
       continue;
     }
-    if (unlikely(wc.status != IBV_WC_SUCCESS)) {
-      TLOG(INFO, tid) << "Bad completion status: " << wc.status << " with error " << ibv_wc_status_str(wc.status) << ";@ node " << qp->idx_.node_id;
-      if (wc.status != IBV_WC_RETRY_EXC_ERR) {
-        TLOG(INFO, tid) << "completion status != IBV_WC_RETRY_EXC_ERR. abort()";
-        abort();
-      } else {
-        it++;
+    cqs[i] = pending_qps[i]->cq_;
+  }
+
+  for (int i = 0; i < cqs.size(); i++) {
+    int max_completions = pending_counts[i];
+    if (max_completions == 0) {
+      continue;
+    }
+    struct ibv_wc wc[max_completions];
+    int poll_result = ibv_poll_cq(cqs[i], max_completions, wc);
+    if (poll_result == 0) {
+      continue;
+    }
+
+    for (int j = 0; j < poll_result; j++) {
+      if (unlikely(wc[j].status != IBV_WC_SUCCESS)) {
+        TLOG(INFO, tid) << "Bad completion status: " << wc[j].status << " with error " << ibv_wc_status_str(wc[j].status) << ";@ node " << pending_qps[i]->idx_.node_id;
+        if (wc[j].status != IBV_WC_RETRY_EXC_ERR) {
+          TLOG(INFO, tid) << "completion status != IBV_WC_RETRY_EXC_ERR. abort()";
+          abort();
+        }
         continue;
       }
+      auto coro_id = wc[j].wr_id;
+      assert(coro_id == i);
+      assert(pending_counts[coro_id] > 0);
+      pending_counts[coro_id] -= 1;
+      if (pending_counts[coro_id] == 0) {
+        AppendCoroutine(&coro_array[coro_id]);
+      }
     }
-    auto coro_id = wc.wr_id;
-    if (coro_id == 0) continue;
-    assert(pending_counts[coro_id] > 0);
-    pending_counts[coro_id] -= 1;
-    if (pending_counts[coro_id] == 0) {
-      AppendCoroutine(&coro_array[coro_id]);
-    }
-    it = pending_qps.erase(it);
   }
 }
+
