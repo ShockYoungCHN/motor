@@ -4,6 +4,7 @@
 #pragma once
 
 #include <list>
+#include <util/debug.h>
 
 #include "base/common.h"
 #include "rlib/logging.hpp"
@@ -84,6 +85,7 @@ class CoroutineScheduler {
 
   Coroutine* coro_tail;
 
+  long long dur0 = 0, dur1 = 0, dur2 = 0;
  private:
   t_id_t t_id;
 
@@ -92,6 +94,7 @@ class CoroutineScheduler {
 
   // number of pending qps (i.e., the ack has not received) per coroutine
   int* pending_counts;
+  int pending_counts_sum = 0;
 };
 
 ALWAYS_INLINE
@@ -101,6 +104,7 @@ void CoroutineScheduler::AddPendingQP(coro_id_t coro_id, RCQP* qp) {
   }
   pending_qps[qp->idx_.node_id]->low_watermark_++;
   pending_counts[coro_id] += 1;
+  pending_counts_sum += 1;
 }
 
 ALWAYS_INLINE
@@ -281,43 +285,57 @@ void CoroutineScheduler::AppendCoroutine(Coroutine* coro) {
   coro_tail->prev_coro = prev;
 }
 
+inline long long now() {
+  auto now_time_point = std::chrono::high_resolution_clock::now();
+
+  auto now_in_ns = std::chrono::time_point_cast<std::chrono::nanoseconds>(now_time_point);
+
+  return now_in_ns.time_since_epoch().count();
+}
+
 ALWAYS_INLINE
 void CoroutineScheduler::PollCompletion(t_id_t tid)
 {
-  int max_completions = 0;
-  for (int i = 0; i < pending_qps.size(); i++) {
-    if (pending_qps[i] == nullptr || pending_qps[i]->low_watermark_ == 0)
-      continue;
-    max_completions += pending_qps[i]->low_watermark_;
-  }
+  // long long dur1 = 0, dur2 = 0;
+  int max_completions = pending_counts_sum;
+  ibv_wc wc[max_completions];
 
-  for (int i = 0; i < pending_qps.size(); i++) {
-    if (pending_qps[i] == nullptr || pending_qps[i]->low_watermark_ == 0)
-      continue;
-
-    ibv_wc wc[max_completions];
-    auto curr_cq = pending_qps[i]->cq_;
-    int poll_result = ibv_poll_cq(curr_cq, max_completions, wc);
-    if (poll_result == 0) {
-      continue;
-    }
-    pending_qps[i]->low_watermark_ -= poll_result;
-
-    for (int j = 0; j < poll_result; j++) {
-      if (unlikely(wc[j].status != IBV_WC_SUCCESS)) {
-        TLOG(INFO, tid) << "Bad completion status: " << wc[j].status << " with error " << ibv_wc_status_str(wc[j].status);
-        if (wc[j].status != IBV_WC_RETRY_EXC_ERR) {
-          TLOG(INFO, tid) << "completion status != IBV_WC_RETRY_EXC_ERR. abort()";
-          abort();
-        }
+  do
+  {
+    for (int i = 0; i < pending_qps.size(); i++)
+    {
+      // auto t3_1 = now();
+      if (pending_qps[i] == nullptr || pending_qps[i]->low_watermark_ == 0)
+        continue;
+      // auto t3_2 = now();
+      auto curr_cq = pending_qps[i]->cq_;
+      int poll_result = ibv_poll_cq(curr_cq, max_completions, wc);
+      if (poll_result == 0) {
         continue;
       }
-      auto coro_id = wc[j].wr_id;
-      assert(pending_counts[coro_id] > 0);
-      pending_counts[coro_id] -= 1;
-      if (pending_counts[coro_id] == 0) {
-        AppendCoroutine(&coro_array[coro_id]);
+      pending_qps[i]->low_watermark_ -= poll_result;
+      pending_counts_sum -= poll_result;
+
+      for (int j = 0; j < poll_result; j++) {
+        if (unlikely(wc[j].status != IBV_WC_SUCCESS)) {
+          TLOG(INFO, tid) << "Bad completion status: " << wc[j].status << " with error " << ibv_wc_status_str(wc[j].status);
+          if (wc[j].status != IBV_WC_RETRY_EXC_ERR) {
+            TLOG(INFO, tid) << "completion status != IBV_WC_RETRY_EXC_ERR. abort()";
+            abort();
+          }
+          continue;
+        }
+        auto coro_id = wc[j].wr_id;
+        assert(pending_counts[coro_id] > 0);
+        pending_counts[coro_id] -= 1;
+        if (pending_counts[coro_id] == 0) {
+          AppendCoroutine(&coro_array[coro_id]);
+        }
       }
+      // dur1 += t3_2 - t3_1;
+      // dur2 += now() - t3_2;
     }
-  }
+  } while (coro_head->next_coro->coro_id == 0);
+  // this->dur1 += dur1;
+  // this->dur2 += dur2;
 }
