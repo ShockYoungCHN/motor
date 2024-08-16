@@ -26,6 +26,7 @@ In modern datacenters, memory disaggregation unpacks monolithic servers to build
 - If you change the number (MUST > 0) of backup replicas, please change the value of ```BACKUP_NUM``` in ```txn/flags.h```.
 
 # Build
+## shell script
 We provide a shell script for easy building.
 
 ```sh
@@ -49,6 +50,20 @@ $ ./build.sh -s
 Add ```-d``` option if you want Debug mode.
 
 PS. If you are familiar with our open-source repository [FORD](https://github.com/minghust/ford), you would become more easier to understand the building process and code structure of Motor.
+
+## custom python script
+
+In order to pipeline the build process, we provide a custom python script to build Motor.
+```sh 
+python3 config_wl.py <workload> <is_memory_node>
+```
+where `<workload>`=`tpcc` or `tatp` or `smallbank`, and `<is_memory_node>` should be set to `false` for CN and `true` for MN ideally.
+However, `<is_memory_node>` exists for future expansion capabilities, it can be simply set to `true` for all the nodes.
+
+The script will 
+1) check the build dependencies, 
+2) configure the memory nodes configuration json file in a cloudlab cluster, where compute node's ip is expected to be `192.168.1.1`, the memory nodes' ip are expected to be `192.168.1.2`, `192.168.1.3`, and `192.168.1.4`.
+3) build the server and client executables.
 
 
 # Run

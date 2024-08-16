@@ -71,12 +71,42 @@ def config_memory_node(config_path):
 
     print("Configuration updated successfully.")
 
+# dependencies required by motor
+packages = {
+    "libibverbs": "libibverbs-dev",
+    "pthread": "build-essential",
+    "boost_coroutine": "libboost-coroutine-dev",
+    "boost_context": "libboost-context-dev",
+    "boost_system": "libboost-system-dev",
+    "cmake": "cmake"
+}
+
+def is_installed(package):
+    try:
+        subprocess.run(["dpkg", "-s", package], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+def install_package(package_name):
+    try:
+        subprocess.run(["sudo", "apt-get", "install", "-y", package_name], check=True)
+        print(f"{package_name} installed successfully.")
+    except subprocess.CalledProcessError:
+        print(f"Error installing {package_name}.")
+
+
+def check_and_install_packages():
+    for package in packages:
+        if not is_installed(packages[package]):
+            install_package(packages[package])
 
 if __name__ == "__main__":
     flag_path = os.path.join(os.path.dirname(__file__), "txn", "flags.h")
     mn_config_path = os.path.join(os.path.dirname(__file__), "config", "mn_config.json")
     workload = sys.argv[1]
     is_memory = sys.argv[2]
+    check_and_install_packages()
     configure_workload(flag_path, mn_config_path, workload)
     if is_memory == "true":
         config_memory_node(mn_config_path)
