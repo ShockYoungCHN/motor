@@ -325,8 +325,8 @@ class RCQPImpl {
     attr.recv_cq = cq;
     attr.pd = rnic->pd;
 
-    attr.comp_mask = IBV_EXP_QP_INIT_ATTR_CREATE_FLAGS |
-                     IBV_EXP_QP_INIT_ATTR_PD | IBV_EXP_QP_INIT_ATTR_ATOMICS_ARG;
+    attr.comp_mask = IBV_QP_INIT_ATTR_CREATE_FLAGS |
+                     IBV_QP_INIT_ATTR_PD | IBV_QP_INIT_ATTR_RX_HASH;
     attr.max_atomic_arg = 32;
 
     attr.cap.max_send_wr = RC_MAX_SEND_SIZE;

@@ -86,7 +86,7 @@ MetaManager::MetaManager() {
 
   // Open device
   opened_rnic = global_rdma_ctrl->open_device(idx);
-
+  RDMA_LOG(INFO) << "opened rnic: " << opened_rnic->ctx->device->dev_name;
   for (auto& remote_node : remote_nodes) {
     GetMRMeta(remote_node);
   }

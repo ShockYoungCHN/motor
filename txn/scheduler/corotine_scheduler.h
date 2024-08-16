@@ -58,8 +58,6 @@ class CoroutineScheduler {
 
   bool RDMACAS(coro_id_t coro_id, RCQP* qp, char* local_buf, uint64_t remote_offset, uint64_t compare, uint64_t swap);
 
-  bool RDMAMaskedCAS(coro_id_t coro_id, RCQP* qp, char* local_buf, uint64_t remote_offset, uint64_t compare, uint64_t swap, uint64_t compare_mask, uint64_t swap_mask);
-
   // For polling
   void PollCompletion(t_id_t tid);  // There is a coroutine polling ACKs
 
@@ -197,24 +195,6 @@ bool CoroutineScheduler::RDMAReadSync(coro_id_t coro_id, RCQP* qp, char* rd_data
 ALWAYS_INLINE
 bool CoroutineScheduler::RDMACAS(coro_id_t coro_id, RCQP* qp, char* local_buf, uint64_t remote_offset, uint64_t compare, uint64_t swap) {
   auto rc = qp->post_cas(local_buf, remote_offset, compare, swap, IBV_SEND_SIGNALED, coro_id);
-  if (rc != SUCC) {
-    RDMA_LOG(ERROR) << "client: post cas fail. rc=" << rc << ", tid = " << t_id << ", coroid = " << coro_id;
-    return false;
-  }
-  AddPendingQP(coro_id, qp);
-  return true;
-}
-
-ALWAYS_INLINE
-bool CoroutineScheduler::RDMAMaskedCAS(coro_id_t coro_id,
-                                       RCQP* qp,
-                                       char* local_buf,
-                                       uint64_t remote_offset,
-                                       uint64_t compare,
-                                       uint64_t swap,
-                                       uint64_t compare_mask,
-                                       uint64_t swap_mask) {
-  auto rc = qp->post_masked_cas(local_buf, remote_offset, compare, swap, compare_mask, swap_mask, IBV_SEND_SIGNALED, coro_id);
   if (rc != SUCC) {
     RDMA_LOG(ERROR) << "client: post cas fail. rc=" << rc << ", tid = " << t_id << ", coroid = " << coro_id;
     return false;
