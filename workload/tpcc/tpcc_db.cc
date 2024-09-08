@@ -516,7 +516,7 @@ void TPCC::Populate_Order_OrderIndex_NewOrder_OrderLine_Table(unsigned long seed
                      tpcc_new_order_val_t_size,
                      (table_id_t)TPCCTableType::kNewOrderTable);
         }
-        for (uint32_t l = 1; l <= uint32_t(order_val.o_ol_cnt); l++) {
+        for (uint32_t l = 1; l <= uint32_t(order_val.o_ol_cnt); l++) { // ol = order line
           tpcc_order_line_key_t order_line_key;
           order_line_key.ol_id = MakeOrderLineKey(w_id, d_id, c, l);
 

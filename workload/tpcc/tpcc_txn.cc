@@ -66,6 +66,7 @@ bool TxNewOrder(TPCC* tpcc_client,
 
   for (int i = 0; i < num_items; i++) {
     int64_t item_id = tpcc_client->GetItemId(random_generator[txn->coro_id]);
+    // p(local stock):p(remote stock) = 1:99
     if (tpcc_client->num_warehouse == 1 ||
         tpcc_client->RandomNumber(random_generator[txn->coro_id], 1, 100) > g_new_order_remote_item_pct) {
       // local stock case

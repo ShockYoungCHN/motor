@@ -289,7 +289,7 @@ bool TXN::CheckInsertCVT(std::vector<InsertOffRead>& pending_insert_off_rw,
                          std::vector<ValueRead>& pending_value_read) {
   for (auto& res : pending_insert_off_rw) {
     res.item->is_fetched = true;
-
+  // for an insert, what we got now is res.buf(local_hash_bucket) read from remote
     int read_pos = NO_POS;
     bool is_read_newest = true;
     auto cvt_idx = FindInsertOff(res, read_pos, is_read_newest);
@@ -301,9 +301,10 @@ bool TXN::CheckInsertCVT(std::vector<InsertOffRead>& pending_insert_off_rw,
     // For real insert, we do not need to read old value, because:
     // 1) the client does not use it, and 2) the client will prepare a new value
     // Hence, we only need to read + lock remote CVTs
+    // todo: check IssueReadLockCVT, items in there are all kInsert, so else statement won't be executed?
     if (res.item->user_op == UserOP::kInsert) {
       char* lock_buff = thread_rdma_buffer_alloc->Alloc(sizeof(lock_t));
-      *(lock_t*)lock_buff = 0xdeadbeaf;
+      *(lock_t*)lock_buff = 0xdeadbeaf; // rdma cas has nothing to do with local sge, just placeholder hee
 
       char* cvt_buff = thread_rdma_buffer_alloc->Alloc(CVTSize);
 
@@ -334,6 +335,7 @@ bool TXN::CheckInsertCVT(std::vector<InsertOffRead>& pending_insert_off_rw,
   return true;
 }
 
+// read the fetched CVT, insert them to cache
 int TXN::FindInsertOff(InsertOffRead& res,
                        int& read_pos,
                        bool& is_read_newest) {
@@ -359,6 +361,10 @@ int TXN::FindInsertOff(InsertOffRead& res,
 
     // Here we do not need to judge whether the empty cvt is locked or not, since
     // the locking status can be detected in Validation phase
+
+    // find available slot only when 1) the insert pos is not found; 2) the fetched cvt is empty
+    // notice: this function handle insert and update together,
+    //         even if OP may be an update, finding an empty slot won't affect correctness
     if ((insert_cvt_pos == NOT_FOUND) && (fetched_cvt->header.value_size == 0)) {
       // Within a txn, multiple items cannot insert into the same slot
       std::pair<node_id_t, offset_t> new_pos(res.remote_node, res.bucket_off + i * CVTSize);
@@ -373,7 +379,7 @@ int TXN::FindInsertOff(InsertOffRead& res,
       target_slot = i;
 
     } else if ((fetched_cvt->header.key == local_item->header.key) &&
-               (fetched_cvt->header.table_id == local_item->header.table_id)) {
+               (fetched_cvt->header.table_id == local_item->header.table_id)) { // handle update
       target_slot = i;
 
       int max_version_pos = 0;

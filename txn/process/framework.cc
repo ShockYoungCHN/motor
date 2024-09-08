@@ -107,7 +107,7 @@ bool TXN::ExeRW(coro_yield_t& yield) {
     return false;
   }
 
-  if (!IssueReadLockCVT(pending_cas_rw, pending_hash_read, pending_insert_off_rw)) {
+  if (!IssueReadLockCVT(pending_cas_rw, pending_hash_read, pending_insert_off_rw)) { // pending_insert_off_rw read the insert hashbkt
     return false;
   }
 
@@ -122,7 +122,7 @@ bool TXN::ExeRW(coro_yield_t& yield) {
     return false;
   }
 
-  if (!CheckHashReadCVT(pending_hash_read, pending_value_read)) {
+  if (!CheckHashReadCVT(pending_hash_read, pending_value_read)) { // pending_hash_read is actually update by mark is_ro to false
     return false;
   }
 
@@ -130,7 +130,7 @@ bool TXN::ExeRW(coro_yield_t& yield) {
     return false;
   }
 
-  if (!CheckInsertCVT(pending_insert_off_rw, pending_cvt_insert, pending_value_read)) {
+  if (!CheckInsertCVT(pending_insert_off_rw, pending_cvt_insert, pending_value_read)) { // altho update logic is in this func, it's impossible to reach that
     return false;
   }
 

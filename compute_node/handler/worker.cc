@@ -74,7 +74,7 @@ __thread CoroutineScheduler* coro_sched;  // Each transaction thread has a corou
 
 // Performance measurement (thread granularity)
 __thread struct timespec msr_start, msr_end, last_end;
-__thread double* timer;
+thread_local std::vector<std::vector<double>> timers;
 __thread uint64_t stat_attempted_tx_total = 0;  // Issued transaction number
 __thread uint64_t stat_committed_tx_total = 0;  // Committed transaction number
 __thread uint64_t last_stat_attempted_tx_total = 0;
@@ -105,13 +105,35 @@ void Poll(coro_yield_t& yield) {
   }
 }
 
+std::pair<double, double> calculatePercentiles(std::vector<double>& data) {
+  if (data.empty()) {
+    throw std::invalid_argument("Data vector is empty");
+  }
+  std::sort(data.begin(), data.end());
+  uint64_t percentile_50 = data[data.size() / 2];
+  uint64_t percentile_99 = data[data.size() * 99 / 100];
+
+  return {percentile_50, percentile_99};
+}
+
+std::pair<double, double> calculatePercentilesForAll(std::vector<std::vector<double>>& timers) {
+  std::vector<double> all_data;
+  for (int i = 0; i < timers.size(); i++) {
+    if (timers[i].empty()) {
+      continue;
+    }
+    auto [percentile_50, percentile_99] = calculatePercentiles(timers[i]);
+    printf("Txn type %d: p50=%f, p99=%f\n", i, percentile_50, percentile_99);
+    all_data.insert(all_data.end(), timers[i].begin(), timers[i].end());
+  }
+  return calculatePercentiles(all_data);
+}
+
 void RecordTpLat(double msr_sec) {
   double attemp_tput = (double)stat_attempted_tx_total / msr_sec;
   double tx_tput = (double)stat_committed_tx_total / msr_sec;
 
-  std::sort(timer, timer + stat_committed_tx_total);
-  double percentile_50 = timer[stat_committed_tx_total / 2];
-  double percentile_99 = timer[stat_committed_tx_total * 99 / 100];
+  auto [percentile_50, percentile_99] = calculatePercentilesForAll(timers);
 
   mux.lock();
 
@@ -207,7 +229,8 @@ void RunTATP(coro_yield_t& yield, coro_id_t coro_id) {
     if (tx_committed) {
       clock_gettime(CLOCK_REALTIME, &tx_end_time);
       double tx_usec = (tx_end_time.tv_sec - tx_start_time.tv_sec) * 1000000 + (double)(tx_end_time.tv_nsec - tx_start_time.tv_nsec) / 1000;
-      timer[stat_committed_tx_total++] = tx_usec;
+      timers[static_cast<int>(tx_type)].push_back(tx_usec);
+      stat_committed_tx_total++;
     }
     if (stat_attempted_tx_total >= ATTEMPTED_NUM) {
       // A coroutine calculate the total execution time and exits
@@ -291,7 +314,8 @@ void RunSmallBank(coro_yield_t& yield, coro_id_t coro_id) {
     if (tx_committed) {
       clock_gettime(CLOCK_REALTIME, &tx_end_time);
       double tx_usec = (tx_end_time.tv_sec - tx_start_time.tv_sec) * 1000000 + (double)(tx_end_time.tv_nsec - tx_start_time.tv_nsec) / 1000;
-      timer[stat_committed_tx_total++] = tx_usec;
+      timers[static_cast<int>(tx_type)].push_back(tx_usec);
+      stat_committed_tx_total++;
     }
     if (stat_attempted_tx_total >= ATTEMPTED_NUM) {
       // A coroutine calculate the total execution time and exits
@@ -375,7 +399,8 @@ void RunTPCC(coro_yield_t& yield, coro_id_t coro_id, int finished_num) {
     if (tx_committed) {
       clock_gettime(CLOCK_REALTIME, &tx_end_time);
       double tx_usec = (tx_end_time.tv_sec - tx_start_time.tv_sec) * 1000000 + (double)(tx_end_time.tv_nsec - tx_start_time.tv_nsec) / 1000;
-      timer[stat_committed_tx_total++] = tx_usec;
+      timers[static_cast<int>(tx_type)].push_back(tx_usec);
+      stat_committed_tx_total++;
     }
 
     if (stat_attempted_tx_total >= (ATTEMPTED_NUM - finished_num)) {
@@ -490,7 +515,8 @@ void RunMICRO(coro_yield_t& yield, coro_id_t coro_id) {
     if (tx_committed) {
       clock_gettime(CLOCK_REALTIME, &tx_end_time);
       double tx_usec = (tx_end_time.tv_sec - tx_start_time.tv_sec) * 1000000 + (double)(tx_end_time.tv_nsec - tx_start_time.tv_nsec) / 1000;
-      timer[stat_committed_tx_total++] = tx_usec;
+      timers[static_cast<int>(tx_committed)].push_back(tx_usec);
+      stat_committed_tx_total++;
     }
 
     if (stat_committed_tx_total >= ATTEMPTED_NUM) {
@@ -561,7 +587,6 @@ void run_thread(thread_params* params,
   locked_key_table = (LockedKeyTable*)p;
   tp_probe_list = thread_tp_probe;
 
-  timer = new double[ATTEMPTED_NUM]();
 
   // Initialize Zipf generator for MICRO benchmark
   if (bench_name == "micro") {
@@ -594,12 +619,16 @@ void run_thread(thread_params* params,
       coro_sched->coro_array[coro_i].func = coro_call_t(bind(Poll, _1));
     } else {
       if (bench_name == "tatp") {
+        timers = std::vector<std::vector<double>>(TATP_TX_TYPES);
         coro_sched->coro_array[coro_i].func = coro_call_t(bind(RunTATP, _1, coro_i));
       } else if (bench_name == "smallbank") {
+        timers = std::vector<std::vector<double>>(SmallBank_TX_TYPES);
         coro_sched->coro_array[coro_i].func = coro_call_t(bind(RunSmallBank, _1, coro_i));
       } else if (bench_name == "tpcc") {
+        timers = std::vector<std::vector<double>>(TPCC_TX_TYPES);
         coro_sched->coro_array[coro_i].func = coro_call_t(bind(RunTPCC, _1, coro_i, 0));
       } else if (bench_name == "micro") {
+        timers = std::vector<std::vector<double>>(MICRO_TX_TYPES);
         coro_sched->coro_array[coro_i].func = coro_call_t(bind(RunMICRO, _1, coro_i));
       }
     }
@@ -628,7 +657,6 @@ void run_thread(thread_params* params,
   mux.unlock();
 
   // Clean
-  delete[] timer;
   if (tatp_workgen_arr) delete[] tatp_workgen_arr;
   if (smallbank_workgen_arr) delete[] smallbank_workgen_arr;
   if (tpcc_workgen_arr) delete[] tpcc_workgen_arr;
@@ -696,8 +724,6 @@ void recovery(thread_params* params,
   locked_key_table = (LockedKeyTable*)p;
   tp_probe_list = thread_tp_probe;
 
-  timer = new double[ATTEMPTED_NUM]();
-
   // Initialize Zipf generator for MICRO benchmark
   if (bench_name == "micro") {
     uint64_t zipf_seed = 2 * thread_gid * GetCPUCycle();
@@ -729,12 +755,16 @@ void recovery(thread_params* params,
       coro_sched->coro_array[coro_i].func = coro_call_t(bind(Poll, _1));
     } else {
       if (bench_name == "tatp") {
+        timers = std::vector<std::vector<double>>(TATP_TX_TYPES);
         coro_sched->coro_array[coro_i].func = coro_call_t(bind(RunTATP, _1, coro_i));
       } else if (bench_name == "smallbank") {
+        timers = std::vector<std::vector<double>>(SmallBank_TX_TYPES);
         coro_sched->coro_array[coro_i].func = coro_call_t(bind(RunSmallBank, _1, coro_i));
       } else if (bench_name == "tpcc") {
+        timers = std::vector<std::vector<double>>(TPCC_TX_TYPES);
         coro_sched->coro_array[coro_i].func = coro_call_t(bind(RunTPCC, _1, coro_i, 0));
       } else if (bench_name == "micro") {
+        timers = std::vector<std::vector<double>>(MICRO_TX_TYPES);
         coro_sched->coro_array[coro_i].func = coro_call_t(bind(RunMICRO, _1, coro_i));
       }
     }
@@ -820,7 +850,6 @@ void recovery(thread_params* params,
   mux.unlock();
 
   // Clean
-  delete[] timer;
   if (tatp_workgen_arr) delete[] tatp_workgen_arr;
   if (smallbank_workgen_arr) delete[] smallbank_workgen_arr;
   if (tpcc_workgen_arr) delete[] tpcc_workgen_arr;

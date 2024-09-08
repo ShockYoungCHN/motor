@@ -122,6 +122,8 @@ bool TXN::IssueReadLockCVT(std::vector<CasRead>& pending_cas_rw,
       offset_t bucket_off = bkt_idx * meta.bucket_size + meta.base_off;
 
       size_t bkt_size = SLOT_NUM[read_write_set[i]->header.table_id] * CVTSize;
+        // reserve space for cvt reading, 2 possible cases: insert or read
+        // insert also has 2 cases: the key exists or not, if not, the bkt size can simply be 0, but if exists, the number above is safe
       char* local_hash_bucket = thread_rdma_buffer_alloc->Alloc(bkt_size);
 
       if (read_write_set[i]->user_op == UserOP::kInsert) {

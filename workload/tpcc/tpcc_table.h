@@ -83,7 +83,7 @@ enum tpcc_warehouse_val_bitmap : int {
   w_state,
   w_zip
 };
-
+// 4+4+11+21+21+21+3+10 = 95
 struct tpcc_warehouse_val_t {
   static const int MIN_NAME = 6;
   static const int MAX_NAME = 10;
@@ -132,7 +132,7 @@ enum tpcc_district_val_bitmap : int {
   d_state,
   d_zip,
 };
-
+// 4+4+4+11+21+21+21+3+10 = 95
 struct tpcc_district_val_t {
   static const int MIN_NAME = 6;
   static const int MAX_NAME = 10;
@@ -189,7 +189,7 @@ enum tpcc_customer_val_bitmap : int {
   c_since,
   c_credit,
 };
-
+// 4+501+4+4+4+4+4+17+3+17+21+21+21+3+10+17+4+3 = 662
 struct tpcc_customer_val_t {
   static const int MIN_FIRST = 8;  // C_FIRST random a-string [8 .. 16]
   static const int MAX_FIRST = 16;
@@ -272,7 +272,7 @@ enum tpcc_history_val_bitmap : int {
   h_date,
   h_data
 };
-
+// 4+4+21 = 29
 struct tpcc_history_val_t {
   static const int MIN_DATA = 12;  // H_DATA random a-string [12 .. 24] from TPCC documents 5.11
   static const int MAX_DATA = 24;
@@ -305,7 +305,7 @@ static_assert(sizeof(tpcc_new_order_key_t) == sizeof(itemkey_t), "");
 enum tpcc_new_order_val_bitmap : int {
   no_dummy = 0
 };
-
+// 13+8 = 21
 struct tpcc_new_order_val_t {
   static constexpr double SCALE_CONSTANT_BETWEEN_NEWORDER_ORDER = 0.7;
 
@@ -340,7 +340,7 @@ enum tpcc_order_val_bitmap : int {
   o_all_local,
   o_entry_d
 };
-
+// 20
 struct tpcc_order_val_t {
   static const int MIN_CARRIER_ID = 1;
   static const int MAX_CARRIER_ID = 10;  // number of distinct per warehouse
@@ -386,7 +386,7 @@ constexpr size_t tpcc_order_index_val_t_size = sizeof(tpcc_order_index_val_t);
  * OrderLine table
  * Primary key: <int32_t ol_o_id, int32_t ol_d_id, int32_t ol_w_id, int32_t ol_number>
  */
-
+// 8
 union tpcc_order_line_key_t {
   int64_t ol_id;
   itemkey_t item_key;
@@ -406,7 +406,7 @@ enum tpcc_order_line_val_bitmap : int {
   ol_delivery_d,
   ol_dist_info
 };
-
+// 4+4+4+4+4+25+8 = 53
 struct tpcc_order_line_val_t {
   static const int MIN_OL_CNT = 5;
   static const int MAX_OL_CNT = 15;
@@ -449,7 +449,7 @@ enum tpcc_item_val_bitmap : int {
   i_name,
   i_data
 };
-
+// 4+4+25+51+8 = 92
 struct tpcc_item_val_t {
   static const int MIN_NAME = 14;  // I_NAME random a-string [14 .. 24]
   static const int MAX_NAME = 24;
@@ -497,7 +497,7 @@ enum tpcc_stock_val_bitmap : int {
   s_dist,
   s_data
 };
-
+// 4+4+4+4+10*25+51+8 = 328
 struct tpcc_stock_val_t {
   static const int MIN_DATA = 26;
   static const int MAX_DATA = 50;

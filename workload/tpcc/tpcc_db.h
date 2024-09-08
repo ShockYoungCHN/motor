@@ -46,9 +46,9 @@ class TPCC {
 
   HashStore* stock_table = nullptr;
 
-  HashStore* customer_index_table = nullptr;
+  HashStore* customer_index_table = nullptr;  // not exist
 
-  HashStore* order_index_table = nullptr;
+  HashStore* order_index_table = nullptr; // not exist
 
   std::vector<HashStore*> primary_table_ptrs;
 
@@ -310,7 +310,7 @@ class TPCC {
     return (uint64_t)seckey;
   }
 
-  ALWAYS_INLINE
+  ALWAYS_INLINE // 2 sets of foreign key (H_C_W_ID, H_C_D_ID, H_C_ID) and (H_W_ID, H _D_ID)
   int64_t MakeHistoryKey(int32_t h_w_id, int32_t h_d_id, int32_t h_c_w_id, int32_t h_c_d_id, int32_t h_c_id) {
     int32_t cid = (h_c_w_id * num_district_per_warehouse + h_c_d_id) * num_customer_per_district + h_c_id;
     int32_t did = h_d_id + (h_w_id * num_district_per_warehouse);

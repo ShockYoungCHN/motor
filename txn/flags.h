@@ -42,7 +42,7 @@
 /*********************** Options **********************/
 #define EARLY_ABORT 1
 #define PRINT_HASH_META 0
-#define OUTPUT_EVENT_STAT 0
+#define OUTPUT_EVENT_STAT 1
 #define OUTPUT_KEY_STAT 0
 
 /*********************** Crash test only **********************/
