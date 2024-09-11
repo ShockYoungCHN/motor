@@ -814,6 +814,7 @@ bool TxOrderStatus(TPCC* tpcc_client,
   return commit_status;
 }
 
+// max=601
 bool TxStockLevel(TPCC* tpcc_client,
                   FastRandom* random_generator,
                   coro_yield_t& yield,

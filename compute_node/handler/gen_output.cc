@@ -8,6 +8,7 @@
 #include <fstream>
 #include <iostream>
 #include <mutex>
+#include <numeric>
 #include <thread>
 
 #include "handler/handler.h"
@@ -30,6 +31,17 @@ std::vector<uint64_t> total_try_times;
 std::vector<uint64_t> total_commit_times;
 std::vector<double> delta_usage;
 
+#if DATA_ACCOUNTING
+std::vector<uint64_t> read_bytes;
+std::vector<uint64_t> write_bytes;
+std::vector<uint64_t> read_cnts;
+std::vector<uint64_t> write_cnts;
+std::vector<uint64_t> CAS_cnts;
+std::vector<std::pair<uint64_t,uint64_t>> hash_latency;
+std::vector<std::pair<uint64_t,uint64_t>> val_latency;
+std::vector<uint64_t> read_throughput;
+std::vector<uint64_t> write_throughput;
+#endif
 // Get the frequency of accessing old versions
 uint64_t access_old_version_cnt[MAX_TNUM_PER_CN];
 uint64_t access_new_version_cnt[MAX_TNUM_PER_CN];
@@ -501,5 +513,40 @@ void Handler::OutputResult(std::string bench_name, std::string system_name) {
   }
 
   of_probe_tp.close();
+#endif
+
+#if DATA_ACCOUNTING
+  std::ofstream of_data_accounting;
+  std::string data_accounting_file = "../../../data_accouting.txt";
+  of_data_accounting.open(data_accounting_file.c_str(), std::ios::app);
+// ignore read_throughput write_throughput for now
+
+  auto getAverage = [](const std::vector<uint64_t>& vec) -> uint64_t {
+    if (vec.empty())
+      throw std::invalid_argument("Data vector is empty");
+    uint64_t sum = std::accumulate(vec.begin(), vec.end(), 0UL);
+    return sum / vec.size();
+  };
+  auto getPairAverage = [](const std::vector<std::pair<uint64_t, uint64_t>>& data, bool use_first) -> double {
+    if (data.empty()) {
+      throw std::invalid_argument("Data vector is empty");
+    }
+    double sum = 0;
+    for (const auto& p : data) {
+      sum += use_first ? p.first : p.second;
+    }
+    return sum / data.size();
+  };
+
+  of_data_accounting << system_name << std::endl;
+  of_data_accounting << "read_bytes write_bytes read_cnts write_cnts CAS_cnts" << std::endl;
+  of_data_accounting << getAverage(read_bytes) << " " << getAverage(write_bytes) << " "
+    << getAverage(read_cnts) << " " << getAverage(write_cnts) << " " << getAverage(CAS_cnts) << std::endl;
+
+  of_data_accounting << "latency p95 p99" << std::endl;
+  of_data_accounting << "hash" << " " << getPairAverage(hash_latency, true) << " " << getPairAverage(hash_latency, false) << std::endl;
+  of_data_accounting << "val" << " " << getPairAverage(val_latency, true) << " " << getPairAverage(val_latency, false) << std::endl;
+  of_data_accounting << std::endl;
+  of_data_accounting.close();
 #endif
 }

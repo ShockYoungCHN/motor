@@ -234,7 +234,7 @@ int TXN::FindMatch(HashRead& res,
       int max_version_pos = 0;
       bool is_ea = false;
       bool is_all_invalid = true;
-
+      // cannot read deleted or ts>txn_start_ts version
       read_pos = FindReadPos(fetched_cvt, is_read_newest, max_version_pos, is_ea, is_all_invalid);
 
       if (is_all_invalid && res.item->user_op == UserOP::kDelete) {

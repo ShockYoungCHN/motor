@@ -82,6 +82,17 @@ class CoroutineScheduler {
   Coroutine* coro_head;
 
   Coroutine* coro_tail;
+#if DATA_ACCOUNTING
+  uint64_t read_bytes;
+  uint64_t write_bytes;
+  uint64_t read_count;
+  uint64_t write_count;
+  uint64_t CAS_count;
+  time_point<high_resolution_clock> hash_ts;
+  time_point<high_resolution_clock> val_ts;
+  std::vector<uint64_t> hash_durs;
+  std::vector<uint64_t> val_durs;
+#endif
 
  private:
   t_id_t t_id;
@@ -100,6 +111,31 @@ void CoroutineScheduler::AddPendingQP(coro_id_t coro_id, RCQP* qp) {
 
 ALWAYS_INLINE
 void CoroutineScheduler::RDMABatch(coro_id_t coro_id, RCQP* qp, ibv_send_wr* send_sr, ibv_send_wr** bad_sr_addr, int piggyback_num) {
+#if DATA_ACCOUNTING
+  // since only last send_sr will be signaled, we need to account rest of requests
+  int send_sr_len = 0;
+  ibv_send_wr* tmp = send_sr;
+  while(tmp->next) {
+    switch (tmp->opcode)
+    {
+    case IBV_WR_ATOMIC_CMP_AND_SWP:
+      CAS_count++;
+      break;
+    case IBV_WR_RDMA_READ:
+      read_count++;
+      read_bytes += tmp->sg_list->length;
+      break;
+    case IBV_WR_RDMA_WRITE:
+      write_count++;
+      write_bytes += tmp->sg_list->length;
+      break;
+    default:
+      TLOG(INFO, t_id) << "Unknown opcode in data accounting: " << tmp->opcode;
+    }
+    send_sr_len++;
+    tmp = tmp->next;
+  }
+#endif
   // piggyback_num should be 1 less than the total number of batched reqs
   send_sr[piggyback_num].wr_id = coro_id;
   auto rc = qp->post_batch(send_sr, bad_sr_addr);
@@ -296,6 +332,24 @@ void CoroutineScheduler::PollCompletion(t_id_t tid) {
         continue;
       }
     }
+#if DATA_ACCOUNTING
+    switch (wc.opcode) {
+      case IBV_WC_RDMA_READ:
+        read_bytes += wc.byte_len;
+        read_count++;
+        break;
+      case IBV_WC_RDMA_WRITE:
+        write_bytes += wc.byte_len;
+        write_count++;
+        break;
+      case IBV_WC_COMP_SWAP:
+        CAS_count++;
+        break;
+      default:
+        TLOG(INFO, tid) << "Unknown opcode in data accounting: " << wc.opcode;
+        break;
+    }
+#endif
     auto coro_id = wc.wr_id;
     if (coro_id == 0) continue;
     assert(pending_counts[coro_id] > 0);

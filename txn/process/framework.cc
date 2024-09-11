@@ -62,7 +62,9 @@ bool TXN::ExeRO(coro_yield_t& yield) {
   // You can read from primary or backup
   std::vector<DirectRead> pending_direct_ro;
   std::vector<HashRead> pending_hash_read;
-
+#ifdef DATA_ACCOUNTING
+  coro_sched->hash_ts = std::chrono::high_resolution_clock::now();
+#endif
   // Issue reads
   if (!IssueReadROCVT(pending_direct_ro, pending_hash_read)) {
     return false;
@@ -71,6 +73,9 @@ bool TXN::ExeRO(coro_yield_t& yield) {
   // Yield to other coroutines when waiting for network replies
   coro_sched->Yield(yield, coro_id);
 
+#ifdef DATA_ACCOUNTING
+  coro_sched->val_ts = std::chrono::high_resolution_clock::now();
+#endif
   std::vector<ValueRead> pending_value_read;
 
   // Receive cvts and issue requests to obtain the raw data
@@ -84,6 +89,17 @@ bool TXN::ExeRO(coro_yield_t& yield) {
 
   if (!pending_value_read.empty()) {
     coro_sched->Yield(yield, coro_id);
+#ifdef DATA_ACCOUNTING
+    // both count as avg time
+    // 1. how much time spent on read CVT or hash bkt(that has a bunch of CVTs)
+    auto hash_dur = std::chrono::duration_cast<std::chrono::nanoseconds>(coro_sched->val_ts - coro_sched->hash_ts).count();
+    auto avg_hash_dur = hash_dur / pending_hash_read.size()+pending_direct_ro.size();
+    coro_sched->hash_durs.push_back(avg_hash_dur);
+    // 2. how much time spent on read actual data
+    auto val_dur = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - coro_sched->val_ts).count();
+    auto avg_hash_val = val_dur / pending_value_read.size();
+    coro_sched->val_durs.push_back(avg_hash_val);
+#endif
     if (!CheckValueRO(pending_value_read)) {
       return false;
     }
@@ -101,7 +117,9 @@ bool TXN::ExeRW(coro_yield_t& yield) {
   // Case 1) Local cached addr -> 1.1) SUCC. It's actually an update. 1.2) FAIL. Address stale and abort
   // Case 2) Local uncached addr -> HashRead and then find pos to insert
   std::vector<InsertOffRead> pending_insert_off_rw;
-
+#ifdef DATA_ACCOUNTING
+  coro_sched->hash_ts = std::chrono::high_resolution_clock::now();
+#endif
   // RW transactions may also have RO data
   if (!IssueReadROCVT(pending_direct_ro, pending_hash_read)) {
     return false;
@@ -117,7 +135,9 @@ bool TXN::ExeRW(coro_yield_t& yield) {
   // RDMA_LOG(DBG) << "coro: " << coro_id << " tx_id: " << tx_id << " check read rorw";
   std::vector<ValueRead> pending_value_read;
   std::vector<LockReadCVT> pending_cvt_insert;
-
+#ifdef DATA_ACCOUNTING
+  coro_sched->val_ts = std::chrono::high_resolution_clock::now();
+#endif
   if (!CheckDirectROCVT(pending_direct_ro, pending_value_read)) {
     return false;
   }
@@ -136,6 +156,23 @@ bool TXN::ExeRW(coro_yield_t& yield) {
 
   if (!pending_value_read.empty() || !pending_cvt_insert.empty()) {
     coro_sched->Yield(yield, coro_id);
+#ifdef DATA_ACCOUNTING
+    // both count as avg time
+    // 1.1 how much time spent on read CVT or hash bkt for RO
+    // 1.2 for RW:
+    //  if cache hit: how much time spent on batch lock+read
+    //  else: how much time spent on read
+    auto hash_dur = std::chrono::duration_cast<std::chrono::nanoseconds>(coro_sched->val_ts - coro_sched->hash_ts).count();
+    auto avg_hash_dur = hash_dur / (pending_hash_read.size()+pending_direct_ro.size()+pending_cas_rw.size()+pending_insert_off_rw.size());
+    coro_sched->hash_durs.push_back(avg_hash_dur);
+    // 2.1 how much time spent on read actual data for RO
+    // 2.2 for RW
+    //  if cache hit: how much time spent on read
+    //  else: how much time spent on lock+read(for update it read actual data, for insert it read hash bkt)
+    auto val_dur = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - coro_sched->val_ts).count();
+    auto avg_hash_val = val_dur / (pending_value_read.size()+pending_cvt_insert.size());
+    coro_sched->val_durs.push_back(avg_hash_val);
+#endif
     if (!CheckValueRW(pending_value_read, pending_cvt_insert)) {
       return false;
     }

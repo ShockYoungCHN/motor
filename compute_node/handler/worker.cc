@@ -34,6 +34,17 @@ extern std::vector<double> tp_vec;
 extern std::vector<double> medianlat_vec;
 extern std::vector<double> taillat_vec;
 extern std::vector<double> delta_usage;
+#if DATA_ACCOUNTING
+extern std::vector<uint64_t> read_bytes;
+extern std::vector<uint64_t> write_bytes;
+extern std::vector<uint64_t> read_cnts;
+extern std::vector<uint64_t> write_cnts;
+extern std::vector<std::pair<uint64_t,uint64_t>> hash_latency;
+extern std::vector<std::pair<uint64_t,uint64_t>> val_latency;
+extern std::vector<uint64_t> read_throughput;
+extern std::vector<uint64_t> write_throughput;
+extern std::vector<uint64_t> CAS_cnts;
+#endif
 
 extern std::vector<uint64_t> total_try_times;
 extern std::vector<uint64_t> total_commit_times;
@@ -105,25 +116,27 @@ void Poll(coro_yield_t& yield) {
   }
 }
 
-std::pair<double, double> calculatePercentiles(std::vector<double>& data) {
+template <typename T>
+std::pair<T, T> calculatePercentiles(std::vector<T>& data) {
   if (data.empty()) {
     throw std::invalid_argument("Data vector is empty");
   }
   std::sort(data.begin(), data.end());
-  uint64_t percentile_50 = data[data.size() / 2];
-  uint64_t percentile_99 = data[data.size() * 99 / 100];
+  T percentile_50 = data[data.size() / 2];
+  T percentile_99 = data[data.size() * 99 / 100];
 
   return {percentile_50, percentile_99};
 }
 
-std::pair<double, double> calculatePercentilesForAll(std::vector<std::vector<double>>& timers) {
-  std::vector<double> all_data;
-  for (int i = 0; i < timers.size(); i++) {
+template <typename T>
+std::pair<T, T> calculatePercentilesForAll(std::vector<std::vector<T>>& timers) {
+  std::vector<T> all_data;
+  for (size_t i = 0; i < timers.size(); i++) {
     if (timers[i].empty()) {
       continue;
     }
     auto [percentile_50, percentile_99] = calculatePercentiles(timers[i]);
-    printf("Txn type %d: p50=%f, p99=%f\n", i, percentile_50, percentile_99);
+    printf("Txn type %zu: p50=%f, p99=%f\n", i, static_cast<double>(percentile_50), static_cast<double>(percentile_99));
     all_data.insert(all_data.end(), timers[i].begin(), timers[i].end());
   }
   return calculatePercentiles(all_data);
@@ -142,6 +155,22 @@ void RecordTpLat(double msr_sec) {
   tp_vec.push_back(tx_tput);
   medianlat_vec.push_back(percentile_50);
   taillat_vec.push_back(percentile_99);
+
+#if DATA_ACCOUNTING
+  read_bytes.push_back(coro_sched->read_bytes);
+  write_bytes.push_back(coro_sched->write_bytes);
+  read_cnts.push_back(coro_sched->read_count);
+  write_cnts.push_back(coro_sched->write_count);
+  CAS_cnts.push_back(coro_sched->CAS_count);
+  std::sort(coro_sched->hash_durs.begin(), coro_sched->hash_durs.end());
+  std::sort(coro_sched->val_durs.begin(), coro_sched->val_durs.end());
+  // todo: maybe calculate the average, p25, p75...
+  auto durs1 = calculatePercentiles(coro_sched->hash_durs);
+  hash_latency.push_back(durs1);
+  auto durs2 = calculatePercentiles(coro_sched->val_durs);
+  val_latency.push_back(durs2);
+  // forget about throughput for now, async read/write make time hard to measure
+#endif
 
   for (size_t i = 0; i < total_try_times.size(); i++) {
     // Records the total number of tried and committed txn in all threads
