@@ -8,6 +8,11 @@
 #include <fstream>
 #include <functional>
 #include <memory>
+#include <boost/accumulators/accumulators.hpp>
+#include <boost/accumulators/statistics/weighted_mean.hpp>
+#include <boost/accumulators/statistics/weighted_median.hpp>
+#include <boost/accumulators/statistics/weighted_tail_quantile.hpp>
+using namespace boost::accumulators;
 
 #include "allocator/buffer_allocator.h"
 #include "connection/qp_manager.h"
@@ -31,6 +36,7 @@ extern std::atomic<uint64_t> connected_recovery_t_num;
 extern std::vector<t_id_t> tid_vec;
 extern std::vector<double> attemp_tp_vec;
 extern std::vector<double> tp_vec;
+extern std::vector<double> avg_lat;
 extern std::vector<double> medianlat_vec;
 extern std::vector<double> taillat_vec;
 extern std::vector<double> delta_usage;
@@ -39,11 +45,16 @@ extern std::vector<uint64_t> read_bytes;
 extern std::vector<uint64_t> write_bytes;
 extern std::vector<uint64_t> read_cnts;
 extern std::vector<uint64_t> write_cnts;
-extern std::vector<std::pair<uint64_t,uint64_t>> hash_latency;
-extern std::vector<std::pair<uint64_t,uint64_t>> val_latency;
-extern std::vector<uint64_t> read_throughput;
-extern std::vector<uint64_t> write_throughput;
+extern std::vector<std::array<uint64_t, 3>> hash_latency;
+extern std::vector<std::array<uint64_t, 3>> val_latency;
 extern std::vector<uint64_t> CAS_cnts;
+#endif
+
+#if TX_PHASE_LATENCY
+extern std::vector<std::array<uint64_t, 3>> exe_latencies;
+extern std::vector<std::array<uint64_t, 3>> validate_latencies;
+extern std::vector<std::array<uint64_t, 3>> commit_latencies;
+extern std::vector<std::array<uint64_t, 3>> abort_latencies;
 #endif
 
 extern std::vector<uint64_t> total_try_times;
@@ -117,44 +128,116 @@ void Poll(coro_yield_t& yield) {
 }
 
 template <typename T>
-std::pair<T, T> calculatePercentiles(std::vector<T>& data) {
+std::vector<T> calculatePercentiles(std::vector<T>& data, const std::vector<double>& percentiles) {
+  std::vector<double> probabilities;
+  probabilities.reserve(percentiles.size());
+
+  for (const auto& p : percentiles) {
+    if (p < 0.0 || p > 100.0) {
+      throw std::invalid_argument("calculatePercentiles: Percentile must be in [0, 100]");
+    }
+    probabilities.push_back(p / 100.0);
+  }
+
   if (data.empty()) {
-    throw std::invalid_argument("Data vector is empty");
+    std::cerr << "Data vector is empty" << std::endl;
+    return std::vector<T>(percentiles.size(), T());
   }
   std::sort(data.begin(), data.end());
-  T percentile_50 = data[data.size() / 2];
-  T percentile_99 = data[data.size() * 99 / 100];
 
-  return {percentile_50, percentile_99};
+  std::vector<T> res;
+  res.reserve(probabilities.size());
+
+  for (const auto& prob : probabilities) {
+    size_t index = static_cast<size_t>(prob * (data.size() - 1));
+    res.push_back(data[index]);
+  }
+
+  return res;
 }
 
 template <typename T>
-std::pair<T, T> calculatePercentilesForAll(std::vector<std::vector<T>>& timers) {
+std::vector<T> calculatePercentiles(
+    std::vector<std::pair<T, int>>& data_with_counts,
+    const std::vector<double>& percentiles)
+{
+  std::vector<double> probabilities;
+  probabilities.reserve(percentiles.size());
+
+  for (const auto& p : percentiles) {
+    if (p < 0.0 || p > 100.0) {
+      throw std::invalid_argument("calculatePercentilesWithCounts: Percentile must be in [0, 100]");
+    }
+    probabilities.push_back(p / 100.0);
+  }
+  if (data_with_counts.empty()) {
+    std::cerr << "Data vector is empty" << std::endl;
+    return std::vector<T>(percentiles.size(), T());
+  }
+
+  std::sort(data_with_counts.begin(), data_with_counts.end());
+
+  int total_count = 0;
+  for (const auto& pair : data_with_counts) {
+    total_count += pair.second;
+  }
+
+  std::vector<T> res;
+  res.reserve(probabilities.size());
+
+  for (const auto& prob : probabilities) {
+    int target_rank = static_cast<int>(prob * total_count);
+    int cumulative_count = 0;
+
+    for (const auto& pair : data_with_counts) {
+      cumulative_count += pair.second;
+
+      if (cumulative_count > target_rank) {
+        res.push_back(pair.first);
+        break;
+      }
+    }
+  }
+  return res;
+}
+
+template <typename T>
+std::vector<T> calculatePercentilesForAll(std::vector<std::vector<T>>& timers, const std::vector<double>& percentiles) {
   std::vector<T> all_data;
   for (size_t i = 0; i < timers.size(); i++) {
     if (timers[i].empty()) {
       continue;
     }
-    auto [percentile_50, percentile_99] = calculatePercentiles(timers[i]);
-    printf("Txn type %zu: p50=%f, p99=%f\n", i, static_cast<double>(percentile_50), static_cast<double>(percentile_99));
+    auto res = calculatePercentiles(timers[i], percentiles);
+    printf("Txn type %zu: p50=%f, p99=%f\n", i, static_cast<double>(res[0]), static_cast<double>(res[1]));
     all_data.insert(all_data.end(), timers[i].begin(), timers[i].end());
   }
-  return calculatePercentiles(all_data);
+  return calculatePercentiles(all_data, percentiles);
 }
 
-void RecordTpLat(double msr_sec) {
+void RecordTpLat(double msr_sec, TXN* txn) {
   double attemp_tput = (double)stat_attempted_tx_total / msr_sec;
   double tx_tput = (double)stat_committed_tx_total / msr_sec;
 
-  auto [percentile_50, percentile_99] = calculatePercentilesForAll(timers);
+  auto res = calculatePercentilesForAll(timers, {50.0, 99.0});
+  // calculate the timers avg
+  double avg = 0;
+  double sum = 0;
+  for (size_t i = 0; i < timers.size(); i++) {
+    if (timers[i].empty()) {
+      continue;
+    }
+    sum += std::accumulate(timers[i].begin(), timers[i].end(), 0.0);
+  }
+  avg = sum / stat_committed_tx_total;
 
   mux.lock();
-
+  avg_lat.push_back(avg);
   tid_vec.push_back(thread_gid);
   attemp_tp_vec.push_back(attemp_tput);
   tp_vec.push_back(tx_tput);
-  medianlat_vec.push_back(percentile_50);
-  taillat_vec.push_back(percentile_99);
+  medianlat_vec.push_back(res[0]);
+  taillat_vec.push_back(res[1]);
 
 #if DATA_ACCOUNTING
   read_bytes.push_back(coro_sched->read_bytes);
@@ -162,16 +245,66 @@ void RecordTpLat(double msr_sec) {
   read_cnts.push_back(coro_sched->read_count);
   write_cnts.push_back(coro_sched->write_count);
   CAS_cnts.push_back(coro_sched->CAS_count);
-  std::sort(coro_sched->hash_durs.begin(), coro_sched->hash_durs.end());
-  std::sort(coro_sched->val_durs.begin(), coro_sched->val_durs.end());
-  // todo: maybe calculate the average, p25, p75...
-  auto durs1 = calculatePercentiles(coro_sched->hash_durs);
-  hash_latency.push_back(durs1);
-  auto durs2 = calculatePercentiles(coro_sched->val_durs);
-  val_latency.push_back(durs2);
-  // forget about throughput for now, async read/write make time hard to measure
+  std::sort(coro_sched->hash_durs.begin(), coro_sched->hash_durs.end(),
+          [](const std::pair<int, double>& a, const std::pair<int, double>& b) {
+              return a.first < b.first;
+          });
+  std::sort(coro_sched->val_durs.begin(), coro_sched->val_durs.end(),
+          [](const std::pair<int, double>& a, const std::pair<int, double>& b) {
+              return a.first < b.first;
+          });
+
+  auto durs1 = calculatePercentiles(coro_sched->hash_durs, {50.0, 99.0});
+  auto avg1 = std::accumulate(coro_sched->hash_durs.begin(), coro_sched->hash_durs.end(), 0.0,
+    [](double sum, const std::pair<uint64_t, int>& p) {
+        return sum + static_cast<double>(p.first) * p.second;
+    }) /
+    std::accumulate(coro_sched->hash_durs.begin(), coro_sched->hash_durs.end(), 0.0,
+        [](double sum, const std::pair<uint64_t, int>& p) {
+            return sum + p.second;
+        });
+  hash_latency.push_back(std::array<uint64_t, 3>{durs1[0], durs1[1], avg1});
+
+  auto durs2 = calculatePercentiles(coro_sched->val_durs, {50.0, 99.0});
+  auto avg2 = std::accumulate(coro_sched->val_durs.begin(), coro_sched->val_durs.end(), 0.0,
+    [](double sum, const std::pair<uint64_t, int>& p) {
+        return sum + static_cast<double>(p.first) * p.second;
+    }) /
+    std::accumulate(coro_sched->val_durs.begin(), coro_sched->val_durs.end(), 0.0,
+        [](double sum, const std::pair<uint64_t, int>& p) {
+            return sum + p.second;
+        });
+  val_latency.push_back(std::array<uint64_t, 3>{durs2[0], durs2[1], avg2});
+
 #endif
 
+#if TX_PHASE_LATENCY
+  // each coro has a txn, each txn has a series of phase latency
+  auto exe_lat = calculatePercentiles(txn->exe_latencies, {50.0, 99.0});
+  auto exe_avg = txn->exe_latencies.empty()
+                 ? 0
+                 :std::accumulate(txn->exe_latencies.begin(), txn->exe_latencies.end(), 0) / txn->exe_latencies.size();
+
+  auto validate_lat = calculatePercentiles(txn->validate_latencies, {50.0, 99.0});
+  auto validate_avg = txn->validate_latencies.empty()
+                 ? 0
+                 :std::accumulate(txn->validate_latencies.begin(), txn->validate_latencies.end(), 0) / txn->validate_latencies.size();
+
+  auto commit_lat = calculatePercentiles(txn->commit_latencies, {50.0, 99.0});
+  auto commit_avg =txn->commit_latencies.empty()
+                 ? 0
+                 :std::accumulate(txn->commit_latencies.begin(), txn->commit_latencies.end(), 0) / txn->commit_latencies.size();
+
+  auto abort_lat = calculatePercentiles(txn->abort_latencies, {50.0, 99.0});
+  auto abort_avg = txn->abort_latencies.empty()
+                 ? 0
+                 : std::accumulate(txn->abort_latencies.begin(), txn->abort_latencies.end(), 0) / txn->abort_latencies.size();
+
+  exe_latencies.push_back(std::array<uint64_t, 3>{exe_lat[0], exe_lat[1], exe_avg});
+  validate_latencies.push_back(std::array<uint64_t, 3>{validate_lat[0], validate_lat[1], validate_avg});
+  commit_latencies.push_back(std::array<uint64_t, 3>{commit_lat[0], commit_lat[1], commit_avg});
+  abort_latencies.push_back(std::array<uint64_t, 3>{abort_lat[0], abort_lat[1], abort_avg});
+#endif
   for (size_t i = 0; i < total_try_times.size(); i++) {
     // Records the total number of tried and committed txn in all threads
     // across all txn types (i.e., i) in the current workload
@@ -266,7 +399,7 @@ void RunTATP(coro_yield_t& yield, coro_id_t coro_id) {
       clock_gettime(CLOCK_REALTIME, &msr_end);
       // double msr_usec = (msr_end.tv_sec - msr_start.tv_sec) * 1000000 + (double) (msr_end.tv_nsec - msr_start.tv_nsec) / 1000;
       double msr_sec = (msr_end.tv_sec - msr_start.tv_sec) + (double)(msr_end.tv_nsec - msr_start.tv_nsec) / 1000000000;
-      RecordTpLat(msr_sec);
+      RecordTpLat(msr_sec, txn);
       break;
     }
     /********************************** Stat end *****************************************/
@@ -351,7 +484,7 @@ void RunSmallBank(coro_yield_t& yield, coro_id_t coro_id) {
       clock_gettime(CLOCK_REALTIME, &msr_end);
       // double msr_usec = (msr_end.tv_sec - msr_start.tv_sec) * 1000000 + (double) (msr_end.tv_nsec - msr_start.tv_nsec) / 1000;
       double msr_sec = (msr_end.tv_sec - msr_start.tv_sec) + (double)(msr_end.tv_nsec - msr_start.tv_nsec) / 1000000000;
-      RecordTpLat(msr_sec);
+      RecordTpLat(msr_sec, txn);
       break;
     }
     /********************************** Stat end *****************************************/
@@ -437,7 +570,7 @@ void RunTPCC(coro_yield_t& yield, coro_id_t coro_id, int finished_num) {
       clock_gettime(CLOCK_REALTIME, &msr_end);
       // double msr_usec = (msr_end.tv_sec - msr_start.tv_sec) * 1000000 + (double) (msr_end.tv_nsec - msr_start.tv_nsec) / 1000;
       double msr_sec = (msr_end.tv_sec - msr_start.tv_sec) + (double)(msr_end.tv_nsec - msr_start.tv_nsec) / 1000000000;
-      RecordTpLat(msr_sec);
+      RecordTpLat(msr_sec, txn);
 
       break;
     }
@@ -448,7 +581,7 @@ void RunTPCC(coro_yield_t& yield, coro_id_t coro_id, int finished_num) {
       clock_gettime(CLOCK_REALTIME, &msr_end);
       // std::cerr << "Thread " << thread_gid << " crash" << std::endl;
       double msr_sec = (msr_end.tv_sec - msr_start.tv_sec) + (double)(msr_end.tv_nsec - msr_start.tv_nsec) / 1000000000;
-      RecordTpLat(msr_sec);
+      RecordTpLat(msr_sec, txn);
       // for (int i = 0; i < coro_num; i++) {
       //   if (locked_key_table[i].num_entry) {
       //     RDMA_LOG(INFO) << "cid: " << i << ", txid: " << locked_key_table[i].tx_id << ", num_entry: " << locked_key_table[i].num_entry;
@@ -553,7 +686,7 @@ void RunMICRO(coro_yield_t& yield, coro_id_t coro_id) {
       clock_gettime(CLOCK_REALTIME, &msr_end);
       // double msr_usec = (msr_end.tv_sec - msr_start.tv_sec) * 1000000 + (double) (msr_end.tv_nsec - msr_start.tv_nsec) / 1000;
       double msr_sec = (msr_end.tv_sec - msr_start.tv_sec) + (double)(msr_end.tv_nsec - msr_start.tv_nsec) / 1000000000;
-      RecordTpLat(msr_sec);
+      RecordTpLat(msr_sec, txn);
       break;
     }
   }

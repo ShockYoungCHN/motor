@@ -96,7 +96,7 @@ bool TxGetNewDestination(TATP* tatp_client,
   DataSetItemPtr callfwd_record[3];
   tatp_callfwd_key_t callfwd_key[3];
 
-  for (unsigned i = 0; i < cf_to_fetch; i++) {
+  for (unsigned i = 0; i < cf_to_fetch; i++) { // cf_to_fetch<3
     callfwd_key[i].s_id = s_id;
     callfwd_key[i].sf_type = sf_type;
     callfwd_key[i].start_time = (i * 8);
@@ -106,12 +106,14 @@ bool TxGetNewDestination(TATP* tatp_client,
                                                       UserOP::kRead);
     txn->AddToReadOnlySet(callfwd_record[i]);
   }
-
+  // todo: when read a non-exist record, will execute return false? (tatp spec says it shouldn't)
   if (!txn->Execute(yield)) return false;
-
+  // read 1,2,3. 1 exists, if 2 non-exist, 3 will not be read (motor)
+  // 1 exists, if 2 non-exist, 3 should be read
   bool callfwd_success = false;
 
   for (unsigned i = 0; i < cf_to_fetch; i++) {
+    // todo: verify this can never happen
     if (callfwd_record[i]->SizeofValue() == 0) {
       continue;
     }

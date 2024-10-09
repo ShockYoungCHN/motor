@@ -90,8 +90,8 @@ class CoroutineScheduler {
   uint64_t CAS_count;
   time_point<high_resolution_clock> hash_ts;
   time_point<high_resolution_clock> val_ts;
-  std::vector<uint64_t> hash_durs;
-  std::vector<uint64_t> val_durs;
+  std::vector<std::pair<uint64_t, int>> hash_durs;
+  std::vector<std::pair<uint64_t,int>> val_durs;
 #endif
 
  private:

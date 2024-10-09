@@ -45,6 +45,7 @@
 #define OUTPUT_EVENT_STAT 1
 #define OUTPUT_KEY_STAT 0
 #define DATA_ACCOUNTING 1
+#define TX_PHASE_LATENCY 1
 
 /*********************** Crash test only **********************/
 #define PROBE_TP 0  // Probing throughput during execution

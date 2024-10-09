@@ -2,6 +2,7 @@
 // Copyright (c) 2023
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstdlib>
 #include <ctime>
@@ -25,6 +26,7 @@ std::atomic<uint64_t> connected_recovery_t_num;
 std::vector<t_id_t> tid_vec;
 std::vector<double> attemp_tp_vec;
 std::vector<double> tp_vec;
+std::vector<double> avg_lat;
 std::vector<double> medianlat_vec;
 std::vector<double> taillat_vec;
 std::vector<uint64_t> total_try_times;
@@ -37,11 +39,17 @@ std::vector<uint64_t> write_bytes;
 std::vector<uint64_t> read_cnts;
 std::vector<uint64_t> write_cnts;
 std::vector<uint64_t> CAS_cnts;
-std::vector<std::pair<uint64_t,uint64_t>> hash_latency;
-std::vector<std::pair<uint64_t,uint64_t>> val_latency;
-std::vector<uint64_t> read_throughput;
-std::vector<uint64_t> write_throughput;
+std::vector<std::array<uint64_t, 3>> hash_latency;
+std::vector<std::array<uint64_t, 3>> val_latency;
 #endif
+
+#if TX_PHASE_LATENCY
+std::vector<std::array<uint64_t, 3>> exe_latencies;
+std::vector<std::array<uint64_t, 3>> validate_latencies;
+std::vector<std::array<uint64_t, 3>> commit_latencies;
+std::vector<std::array<uint64_t, 3>> abort_latencies;
+#endif
+
 // Get the frequency of accessing old versions
 uint64_t access_old_version_cnt[MAX_TNUM_PER_CN];
 uint64_t access_new_version_cnt[MAX_TNUM_PER_CN];
@@ -405,7 +413,9 @@ void Handler::OutputResult(std::string bench_name, std::string system_name) {
   of_abort_rate << std::endl;
   of_abort_rate.close();
 
-  std::cout << system_name << " " << total_attemp_tp / 1000 << " " << total_tp / 1000 << " " << avg_median << " " << avg_tail << std::endl;
+  // todo: the avg lat of committed txn is not recorded to res_file
+  auto avg = std::accumulate(avg_lat.begin(), avg_lat.end(), 0.0) / avg_lat.size();
+  std::cout << system_name << " " << total_attemp_tp / 1000 << " " << total_tp / 1000 << " " << avg_median << " " << avg_tail << " " << avg << std::endl;
 
   double total_delta_usage_MB = 0;
   for (int i = 0; i < delta_usage.size(); i++) {
@@ -515,10 +525,11 @@ void Handler::OutputResult(std::string bench_name, std::string system_name) {
   of_probe_tp.close();
 #endif
 
-#if DATA_ACCOUNTING
+  // below 2 flags are added by Yuanzhuo, they might not be compatible with the PROBE_TP, OUTPUT_KEY_STAT, OUTPUT_EVENT_STAT
   std::ofstream of_data_accounting;
   std::string data_accounting_file = "../../../data_accouting.txt";
   of_data_accounting.open(data_accounting_file.c_str(), std::ios::app);
+#if DATA_ACCOUNTING
 // ignore read_throughput write_throughput for now
 
   auto getAverage = [](const std::vector<uint64_t>& vec) -> uint64_t {
@@ -527,13 +538,13 @@ void Handler::OutputResult(std::string bench_name, std::string system_name) {
     uint64_t sum = std::accumulate(vec.begin(), vec.end(), 0UL);
     return sum / vec.size();
   };
-  auto getPairAverage = [](const std::vector<std::pair<uint64_t, uint64_t>>& data, bool use_first) -> double {
+  auto getArrAverage = [](const std::vector<std::array<uint64_t, 3>>& data, int index) -> uint64_t {
     if (data.empty()) {
       throw std::invalid_argument("Data vector is empty");
     }
-    double sum = 0;
-    for (const auto& p : data) {
-      sum += use_first ? p.first : p.second;
+    uint64_t sum = 0;
+    for (const auto& arr : data) {
+      sum += arr[index];
     }
     return sum / data.size();
   };
@@ -542,11 +553,37 @@ void Handler::OutputResult(std::string bench_name, std::string system_name) {
   of_data_accounting << "read_bytes write_bytes read_cnts write_cnts CAS_cnts" << std::endl;
   of_data_accounting << getAverage(read_bytes) << " " << getAverage(write_bytes) << " "
     << getAverage(read_cnts) << " " << getAverage(write_cnts) << " " << getAverage(CAS_cnts) << std::endl;
-
-  of_data_accounting << "latency p95 p99" << std::endl;
-  of_data_accounting << "hash" << " " << getPairAverage(hash_latency, true) << " " << getPairAverage(hash_latency, false) << std::endl;
-  of_data_accounting << "val" << " " << getPairAverage(val_latency, true) << " " << getPairAverage(val_latency, false) << std::endl;
-  of_data_accounting << std::endl;
-  of_data_accounting.close();
 #endif
+
+#if defined(TX_PHASE_LATENCY) && !defined(DATA_ACCOUNTING)
+  of_data_accounting << "exe_latency validate_latency commit_latency abort_latency" << std::endl;
+  of_data_accounting << "p50" << " " << getArrAverage(exe_latencies, 0) << " " << getArrAverage(validate_latencies, 0) << " "
+    << getArrAverage(commit_latencies, 0) << " " << getArrAverage(abort_latencies, 0) << std::endl;
+  of_data_accounting << "p99" << " " << getArrAverage(exe_latencies, 1) << " " << getArrAverage(validate_latencies, 1) << " "
+    << getArrAverage(commit_latencies, 1) << " " << getArrAverage(abort_latencies, 1) << std::endl;
+  of_data_accounting << "avg" << " " << getArrAverage(exe_latencies, 2) << " " << getArrAverage(validate_latencies, 2) << " "
+    << getArrAverage(commit_latencies, 2) << " " << getArrAverage(abort_latencies, 2) << std::endl;
+  of_data_accounting << std::endl;
+#elif defined(DATA_ACCOUNTING) && !defined(TX_PHASE_LATENCY)
+  // p50 and p99 of hash and val latency are not accurate
+  of_data_accounting << "latency hash val" << std::endl;
+  of_data_accounting << "p50" << " " << getArrAverage(hash_latency, 0) << " " << getArrAverage(val_latency, 0) << std::endl;
+  of_data_accounting << "p99" << " " << getArrAverage(hash_latency, 1) << " " << getArrAverage(val_latency, 1) << std::endl;
+  of_data_accounting << "avg" << " " << getArrAverage(hash_latency, 2) << " " << getArrAverage(val_latency, 2) << std::endl;
+  of_data_accounting << std::endl;
+#else
+  of_data_accounting << "exe_latency validate_latency commit_latency abort_latency hash_latency val_latency" << std::endl;
+  of_data_accounting << "p50" << " " << getArrAverage(exe_latencies, 0) << " " << getArrAverage(validate_latencies, 0) << " "
+    << getArrAverage(commit_latencies, 0) << " " << getArrAverage(abort_latencies, 0) << " "
+    << getArrAverage(hash_latency, 0) << " " << getArrAverage(val_latency, 0) << std::endl;
+  of_data_accounting << "p99" << " " << getArrAverage(exe_latencies, 1) << " " << getArrAverage(validate_latencies, 1) << " "
+    << getArrAverage(commit_latencies, 1) << " " << getArrAverage(abort_latencies, 1) << " "
+    << getArrAverage(hash_latency, 1) << " " << getArrAverage(val_latency, 1) << std::endl;
+  of_data_accounting << "avg" << " " << getArrAverage(exe_latencies, 2) << " " << getArrAverage(validate_latencies, 2) << " "
+    << getArrAverage(commit_latencies, 2) << " " << getArrAverage(abort_latencies, 2) << " "
+    << getArrAverage(hash_latency, 2) << " " << getArrAverage(val_latency, 2) << std::endl;
+  of_data_accounting << std::endl;
+#endif
+
+  of_data_accounting.close();
 }

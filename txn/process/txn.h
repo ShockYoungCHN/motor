@@ -271,6 +271,14 @@ class TXN {
 
   MetaManager* global_meta_man;  // Global metadata manager
 
+#ifdef TX_PHASE_LATENCY
+  time_point<high_resolution_clock> start_ts;
+  std::vector<uint64_t> exe_latencies;
+  std::vector<uint64_t> commit_latencies;
+  std::vector<uint64_t> abort_latencies;
+  std::vector<uint64_t> validate_latencies;
+#endif
+
  private:
   CoroutineScheduler* coro_sched;  // Thread local coroutine scheduler
 
@@ -320,6 +328,9 @@ void TXN::Begin(tx_id_t txid, TXN_TYPE txn_t, const std::string& name) {
   start_time = txid;
   txn_type = txn_t;
   txn_name = name;
+#ifdef TX_PHASE_LATENCY
+  start_ts = high_resolution_clock::now();
+#endif
 
   thread_locked_key_table[coro_id].num_entry = 0;
   thread_locked_key_table[coro_id].tx_id = txid;
@@ -364,7 +375,7 @@ int TXN::FindReadPos(CVT* cvt, bool& is_read_newest, int& max_pos, bool& is_ea, 
       if ((global_meta_man->iso_level == ISOLATION::SR) &&
           (txn_type == TXN_TYPE::kRWTxn)) {
         // In SR and rw txn, if reading a version larger than start time, I can early abort,
-        // since in Validation I must abort by acquiring a more larger Tcommit
+        // since in Validation I must abort by acquiring a larger Tcommit
         event_counter.RegEvent(t_id, txn_name, "FindReadPos:EarlyAbort");
         is_ea = true;
         // access_old_version_cnt[t_id]++;

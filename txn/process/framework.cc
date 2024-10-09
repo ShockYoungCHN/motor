@@ -43,18 +43,35 @@ bool TXN::Commit(coro_yield_t& yield) {
 
   // After obtaining all locks, I get the commit timestamp
   commit_time = ++tx_id_generator;
-
+#ifdef TX_PHASE_LATENCY
+  auto commit_start = std::chrono::high_resolution_clock::now();
+  time_point<high_resolution_clock> validate_end;
+  time_point<high_resolution_clock> commit_end;
+#endif
   if (!Validate(yield)) {
-    goto ABORT;
+#ifdef TX_PHASE_LATENCY
+    validate_end = std::chrono::high_resolution_clock::now();
+#endif
+    Abort();
+#ifdef TX_PHASE_LATENCY
+    auto abort_end = std::chrono::high_resolution_clock::now();
+    exe_latencies.emplace_back(std::chrono::duration_cast<std::chrono::nanoseconds>(commit_start - start_ts).count());
+    validate_latencies.emplace_back(std::chrono::duration_cast<std::chrono::nanoseconds>(validate_end - commit_start).count());
+    abort_latencies.emplace_back(std::chrono::duration_cast<std::chrono::nanoseconds>(abort_end - validate_end).count());
+#endif
+    return false;
   }
-
+#ifdef TX_PHASE_LATENCY
+  validate_end = std::chrono::high_resolution_clock::now();
+#endif
   CommitAll();
-
+#ifdef TX_PHASE_LATENCY
+  commit_end = std::chrono::high_resolution_clock::now();
+  exe_latencies.emplace_back(std::chrono::duration_cast<std::chrono::nanoseconds>(commit_start - start_ts).count());
+  validate_latencies.emplace_back(std::chrono::duration_cast<std::chrono::nanoseconds>(validate_end - commit_start).count());
+  commit_latencies.emplace_back(std::chrono::duration_cast<std::chrono::nanoseconds>(commit_end - validate_end).count());
+#endif
   return true;
-
-ABORT:
-  Abort();
-  return false;
 }
 
 // Two reads. First reading the correct version's address, then reading the data itself
@@ -93,12 +110,23 @@ bool TXN::ExeRO(coro_yield_t& yield) {
     // both count as avg time
     // 1. how much time spent on read CVT or hash bkt(that has a bunch of CVTs)
     auto hash_dur = std::chrono::duration_cast<std::chrono::nanoseconds>(coro_sched->val_ts - coro_sched->hash_ts).count();
-    auto avg_hash_dur = hash_dur / pending_hash_read.size()+pending_direct_ro.size();
-    coro_sched->hash_durs.push_back(avg_hash_dur);
+    size_t hash_direct_cnt = pending_hash_read.size() + pending_direct_ro.size();
+    if (hash_direct_cnt > 0) {
+      auto avg_hash_dur = hash_dur / hash_direct_cnt;
+      coro_sched->hash_durs.emplace_back(avg_hash_dur, hash_direct_cnt);
+    } else {
+      coro_sched->hash_durs.emplace_back(0, 0);
+    }
+
+    size_t value_read_cnt = pending_value_read.size();
     // 2. how much time spent on read actual data
     auto val_dur = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - coro_sched->val_ts).count();
-    auto avg_hash_val = val_dur / pending_value_read.size();
-    coro_sched->val_durs.push_back(avg_hash_val);
+    if (value_read_cnt > 0) {
+      auto avg_hash_val = val_dur / value_read_cnt;
+      coro_sched->val_durs.emplace_back(avg_hash_val, value_read_cnt);
+    } else {
+      coro_sched->val_durs.emplace_back(0, 0);
+    }
 #endif
     if (!CheckValueRO(pending_value_read)) {
       return false;
@@ -163,15 +191,25 @@ bool TXN::ExeRW(coro_yield_t& yield) {
     //  if cache hit: how much time spent on batch lock+read
     //  else: how much time spent on read
     auto hash_dur = std::chrono::duration_cast<std::chrono::nanoseconds>(coro_sched->val_ts - coro_sched->hash_ts).count();
-    auto avg_hash_dur = hash_dur / (pending_hash_read.size()+pending_direct_ro.size()+pending_cas_rw.size()+pending_insert_off_rw.size());
-    coro_sched->hash_durs.push_back(avg_hash_dur);
+    size_t hash_direct_insert_cnt = pending_hash_read.size()+pending_direct_ro.size()+pending_cas_rw.size()+pending_insert_off_rw.size();
+    if (hash_direct_insert_cnt > 0) {
+      auto avg_hash_dur = hash_dur / hash_direct_insert_cnt;
+      coro_sched->hash_durs.emplace_back(avg_hash_dur, hash_direct_insert_cnt);
+    } else {
+      coro_sched->hash_durs.emplace_back(0, 0);
+    }
     // 2.1 how much time spent on read actual data for RO
     // 2.2 for RW
     //  if cache hit: how much time spent on read
     //  else: how much time spent on lock+read(for update it read actual data, for insert it read hash bkt)
     auto val_dur = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - coro_sched->val_ts).count();
-    auto avg_hash_val = val_dur / (pending_value_read.size()+pending_cvt_insert.size());
-    coro_sched->val_durs.push_back(avg_hash_val);
+    size_t read_insert_cnt = pending_value_read.size()+pending_cvt_insert.size();
+    if (read_insert_cnt > 0) {
+      auto avg_hash_val = val_dur / read_insert_cnt;
+      coro_sched->val_durs.emplace_back(avg_hash_val, read_insert_cnt);
+    } else {
+      coro_sched->val_durs.emplace_back(0, 0);
+    }
 #endif
     if (!CheckValueRW(pending_value_read, pending_cvt_insert)) {
       return false;
