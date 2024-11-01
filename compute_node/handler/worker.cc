@@ -313,6 +313,36 @@ void RecordTpLat(double msr_sec, TXN* txn) {
   }
 
   mux.unlock();
+#if ACCESSED_ROWS
+  // output touched rows
+  auto getPercentile = [](uint64_t data[], int data_len, double percentile)
+  {
+    auto sum = std::accumulate(data, data + data_len, 0ULL);
+    auto idx = static_cast<uint64_t>(percentile * sum);
+    uint64_t cum = 0;
+    for (int i = 0; i < data_len; i++)
+    {
+      cum += data[i];
+      if (cum >= idx)
+      {
+        return i;
+      }
+    }
+    assert(false);
+  };
+  auto getAvg = [](uint64_t data[], int data_len)
+  {
+    uint64_t weighted_sum = 0;
+    for(int i = 0; i < data_len; ++i)
+      weighted_sum += data[i] * i;
+
+    auto sum = std::accumulate(data, data + data_len, 0ULL);
+    return  sum==0?0:weighted_sum/sum;
+  };
+  printf("p50 p99 avg\n");
+  printf("commit: %d %d %lu\n", getPercentile(txn->commit_accessed_rows, 1024, 0.5), getPercentile(txn->commit_accessed_rows, 1024, 0.99), getAvg(txn->commit_accessed_rows, 1024));
+  printf("abort: %d %d %lu\n", getPercentile(txn->abort_accessed_rows, 1024, 0.5), getPercentile(txn->abort_accessed_rows, 1024, 0.99), getAvg(txn->abort_accessed_rows, 1024));
+#endif
 }
 
 // Run actual transactions

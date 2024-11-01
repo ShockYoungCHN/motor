@@ -728,11 +728,11 @@ const int64_t tpcc_add_magic = 818;             // customer_index, order_index, 
 #define tatp_callfwd_numberx0_magic (TATP_MAGIC + 4)
 
 /* STORED PROCEDURE EXECUTION FREQUENCIES (0-100) */
-#define FREQUENCY_NEW_ORDER 0//45
-#define FREQUENCY_PAYMENT 0//43
-#define FREQUENCY_ORDER_STATUS 0//4
-#define FREQUENCY_DELIVERY 0//4
-#define FREQUENCY_STOCK_LEVEL 100//4
+#define FREQUENCY_NEW_ORDER 45//45
+#define FREQUENCY_PAYMENT 43//43
+#define FREQUENCY_ORDER_STATUS 4//4
+#define FREQUENCY_DELIVERY 4//4
+#define FREQUENCY_STOCK_LEVEL 4//4
 
 // Transaction workload type
 #define TPCC_TX_TYPES 5

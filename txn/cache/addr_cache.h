@@ -105,6 +105,8 @@ class AddrCache {
     }
   }
 
+
+  // todo: output the addr size at the end
   size_t TotalAddrSize() {
     size_t total_size = 0;
     for (auto it = addr_map.begin(); it != addr_map.end(); it++) {

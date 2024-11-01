@@ -38,22 +38,28 @@ ABORT:
 bool TXN::Commit(coro_yield_t& yield) {
   // In MVCC, read-only txn directly commits
   if (read_write_set.empty()) {
+#if ACCESSED_ROWS
+    abort_accessed_rows[accessed_rows] ++;
+#endif
     return true;
   }
 
   // After obtaining all locks, I get the commit timestamp
   commit_time = ++tx_id_generator;
-#ifdef TX_PHASE_LATENCY
+#if TX_PHASE_LATENCY
   auto commit_start = std::chrono::high_resolution_clock::now();
   time_point<high_resolution_clock> validate_end;
   time_point<high_resolution_clock> commit_end;
 #endif
   if (!Validate(yield)) {
-#ifdef TX_PHASE_LATENCY
+#if TX_PHASE_LATENCY
     validate_end = std::chrono::high_resolution_clock::now();
 #endif
+#if ACCESSED_ROWS
+    abort_accessed_rows[accessed_rows] ++;
+#endif
     Abort();
-#ifdef TX_PHASE_LATENCY
+#if TX_PHASE_LATENCY
     auto abort_end = std::chrono::high_resolution_clock::now();
     exe_latencies.emplace_back(std::chrono::duration_cast<std::chrono::nanoseconds>(commit_start - start_ts).count());
     validate_latencies.emplace_back(std::chrono::duration_cast<std::chrono::nanoseconds>(validate_end - commit_start).count());
@@ -61,11 +67,14 @@ bool TXN::Commit(coro_yield_t& yield) {
 #endif
     return false;
   }
-#ifdef TX_PHASE_LATENCY
+#if TX_PHASE_LATENCY
   validate_end = std::chrono::high_resolution_clock::now();
 #endif
+#if ACCESSED_ROWS
+  commit_accessed_rows[accessed_rows] ++;
+#endif
   CommitAll();
-#ifdef TX_PHASE_LATENCY
+#if TX_PHASE_LATENCY
   commit_end = std::chrono::high_resolution_clock::now();
   exe_latencies.emplace_back(std::chrono::duration_cast<std::chrono::nanoseconds>(commit_start - start_ts).count());
   validate_latencies.emplace_back(std::chrono::duration_cast<std::chrono::nanoseconds>(validate_end - commit_start).count());
@@ -79,7 +88,7 @@ bool TXN::ExeRO(coro_yield_t& yield) {
   // You can read from primary or backup
   std::vector<DirectRead> pending_direct_ro;
   std::vector<HashRead> pending_hash_read;
-#ifdef DATA_ACCOUNTING
+#if DATA_ACCOUNTING
   coro_sched->hash_ts = std::chrono::high_resolution_clock::now();
 #endif
   // Issue reads
@@ -90,7 +99,7 @@ bool TXN::ExeRO(coro_yield_t& yield) {
   // Yield to other coroutines when waiting for network replies
   coro_sched->Yield(yield, coro_id);
 
-#ifdef DATA_ACCOUNTING
+#if DATA_ACCOUNTING
   coro_sched->val_ts = std::chrono::high_resolution_clock::now();
 #endif
   std::vector<ValueRead> pending_value_read;
@@ -106,7 +115,7 @@ bool TXN::ExeRO(coro_yield_t& yield) {
 
   if (!pending_value_read.empty()) {
     coro_sched->Yield(yield, coro_id);
-#ifdef DATA_ACCOUNTING
+#if DATA_ACCOUNTING
     // both count as avg time
     // 1. how much time spent on read CVT or hash bkt(that has a bunch of CVTs)
     auto hash_dur = std::chrono::duration_cast<std::chrono::nanoseconds>(coro_sched->val_ts - coro_sched->hash_ts).count();
@@ -145,7 +154,7 @@ bool TXN::ExeRW(coro_yield_t& yield) {
   // Case 1) Local cached addr -> 1.1) SUCC. It's actually an update. 1.2) FAIL. Address stale and abort
   // Case 2) Local uncached addr -> HashRead and then find pos to insert
   std::vector<InsertOffRead> pending_insert_off_rw;
-#ifdef DATA_ACCOUNTING
+#if DATA_ACCOUNTING
   coro_sched->hash_ts = std::chrono::high_resolution_clock::now();
 #endif
   // RW transactions may also have RO data
@@ -163,7 +172,7 @@ bool TXN::ExeRW(coro_yield_t& yield) {
   // RDMA_LOG(DBG) << "coro: " << coro_id << " tx_id: " << tx_id << " check read rorw";
   std::vector<ValueRead> pending_value_read;
   std::vector<LockReadCVT> pending_cvt_insert;
-#ifdef DATA_ACCOUNTING
+#if DATA_ACCOUNTING
   coro_sched->val_ts = std::chrono::high_resolution_clock::now();
 #endif
   if (!CheckDirectROCVT(pending_direct_ro, pending_value_read)) {
@@ -184,7 +193,7 @@ bool TXN::ExeRW(coro_yield_t& yield) {
 
   if (!pending_value_read.empty() || !pending_cvt_insert.empty()) {
     coro_sched->Yield(yield, coro_id);
-#ifdef DATA_ACCOUNTING
+#if DATA_ACCOUNTING
     // both count as avg time
     // 1.1 how much time spent on read CVT or hash bkt for RO
     // 1.2 for RW:

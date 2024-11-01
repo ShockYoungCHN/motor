@@ -42,10 +42,11 @@
 /*********************** Options **********************/
 #define EARLY_ABORT 1
 #define PRINT_HASH_META 0
-#define OUTPUT_EVENT_STAT 1
+#define OUTPUT_EVENT_STAT 0
 #define OUTPUT_KEY_STAT 0
-#define DATA_ACCOUNTING 1
-#define TX_PHASE_LATENCY 1
+#define DATA_ACCOUNTING 0
+#define TX_PHASE_LATENCY 0
+#define ACCESSED_ROWS 0 // counting how many rows are accessed
 
 /*********************** Crash test only **********************/
 #define PROBE_TP 0  // Probing throughput during execution

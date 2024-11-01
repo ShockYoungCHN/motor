@@ -271,7 +271,7 @@ class TXN {
 
   MetaManager* global_meta_man;  // Global metadata manager
 
-#ifdef TX_PHASE_LATENCY
+#if TX_PHASE_LATENCY
   time_point<high_resolution_clock> start_ts;
   std::vector<uint64_t> exe_latencies;
   std::vector<uint64_t> commit_latencies;
@@ -279,6 +279,11 @@ class TXN {
   std::vector<uint64_t> validate_latencies;
 #endif
 
+#if ACCESSED_ROWS
+  uint64_t accessed_rows = 0;
+  uint64_t commit_accessed_rows[1024];
+  uint64_t abort_accessed_rows[1024];
+#endif
  private:
   CoroutineScheduler* coro_sched;  // Thread local coroutine scheduler
 
@@ -328,7 +333,10 @@ void TXN::Begin(tx_id_t txid, TXN_TYPE txn_t, const std::string& name) {
   start_time = txid;
   txn_type = txn_t;
   txn_name = name;
-#ifdef TX_PHASE_LATENCY
+#if ACCESSED_ROWS
+  accessed_rows = 0;
+#endif
+#if TX_PHASE_LATENCY
   start_ts = high_resolution_clock::now();
 #endif
 
@@ -341,7 +349,9 @@ void TXN::AddToReadOnlySet(DataSetItemPtr item) {
 #if OUTPUT_KEY_STAT
   key_counter.RegKey(t_id, KeyType::kKeyRead, txn_name, item->header.table_id, item->header.key);
 #endif
-
+#if ACCESSED_ROWS
+  accessed_rows++;
+#endif
   read_only_set.emplace_back(item);
 }
 
@@ -349,6 +359,9 @@ ALWAYS_INLINE
 void TXN::AddToReadWriteSet(DataSetItemPtr item) {
 #if OUTPUT_KEY_STAT
   key_counter.RegKey(t_id, KeyType::kKeyWrite, txn_name, item->header.table_id, item->header.key);
+#endif
+#if ACCESSED_ROWS
+  accessed_rows++;
 #endif
   read_write_set.emplace_back(item);
 }

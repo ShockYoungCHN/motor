@@ -555,7 +555,7 @@ void Handler::OutputResult(std::string bench_name, std::string system_name) {
     << getAverage(read_cnts) << " " << getAverage(write_cnts) << " " << getAverage(CAS_cnts) << std::endl;
 #endif
 
-#if defined(TX_PHASE_LATENCY) && !defined(DATA_ACCOUNTING)
+#if TX_PHASE_LATENCY == 1 && DATA_ACCOUNTING == 0
   of_data_accounting << "exe_latency validate_latency commit_latency abort_latency" << std::endl;
   of_data_accounting << "p50" << " " << getArrAverage(exe_latencies, 0) << " " << getArrAverage(validate_latencies, 0) << " "
     << getArrAverage(commit_latencies, 0) << " " << getArrAverage(abort_latencies, 0) << std::endl;
@@ -564,14 +564,14 @@ void Handler::OutputResult(std::string bench_name, std::string system_name) {
   of_data_accounting << "avg" << " " << getArrAverage(exe_latencies, 2) << " " << getArrAverage(validate_latencies, 2) << " "
     << getArrAverage(commit_latencies, 2) << " " << getArrAverage(abort_latencies, 2) << std::endl;
   of_data_accounting << std::endl;
-#elif defined(DATA_ACCOUNTING) && !defined(TX_PHASE_LATENCY)
+#elif TX_PHASE_LATENCY == 0 && DATA_ACCOUNTING == 1
   // p50 and p99 of hash and val latency are not accurate
   of_data_accounting << "latency hash val" << std::endl;
   of_data_accounting << "p50" << " " << getArrAverage(hash_latency, 0) << " " << getArrAverage(val_latency, 0) << std::endl;
   of_data_accounting << "p99" << " " << getArrAverage(hash_latency, 1) << " " << getArrAverage(val_latency, 1) << std::endl;
   of_data_accounting << "avg" << " " << getArrAverage(hash_latency, 2) << " " << getArrAverage(val_latency, 2) << std::endl;
   of_data_accounting << std::endl;
-#else
+#elif TX_PHASE_LATENCY == 1 && DATA_ACCOUNTING == 1
   of_data_accounting << "exe_latency validate_latency commit_latency abort_latency hash_latency val_latency" << std::endl;
   of_data_accounting << "p50" << " " << getArrAverage(exe_latencies, 0) << " " << getArrAverage(validate_latencies, 0) << " "
     << getArrAverage(commit_latencies, 0) << " " << getArrAverage(abort_latencies, 0) << " "
