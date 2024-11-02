@@ -107,12 +107,14 @@ class AddrCache {
 
 
   // todo: output the addr size at the end
-  size_t TotalAddrSize() {
+  size_t TotalAddrSize(bool offset_only = false) {
     size_t total_size = 0;
     for (auto it = addr_map.begin(); it != addr_map.end(); it++) {
-      total_size += sizeof(node_id_t);
+      if (!offset_only)
+        total_size += sizeof(node_id_t);
       for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
-        total_size += sizeof(table_id_t);
+        if (!offset_only)
+          total_size += sizeof(table_id_t);
         for (auto it3 = it2->second.begin(); it3 != it2->second.end(); it3++) {
           total_size += (sizeof(itemkey_t) + sizeof(offset_t));
         }

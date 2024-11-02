@@ -206,6 +206,7 @@ void TATP::PopulateSecondarySubscriberTable() {
   }
 }
 
+// AccessInfo table size = [1, 4] * num_subscriber
 void TATP::PopulateAccessInfoTable() {
   std::vector<uint8_t> ai_type_values = {1, 2, 3, 4};
 

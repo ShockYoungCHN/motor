@@ -302,12 +302,18 @@ void Handler::GenThreads(std::string bench_name) {
   }
 #endif
 
+  uint64_t total_addr_size = 0;
+  uint64_t total_offset_size = 0;
   for (t_id_t i = 0; i < thread_num_per_machine; i++) {
     if (thread_arr[i].joinable()) {
       thread_arr[i].join();
       // RDMA_LOG(INFO) << "Thread " << i << " joins";
     }
+    total_addr_size+=param_arr[i].addr_cache->TotalAddrSize();
+    total_offset_size+=param_arr[i].addr_cache->TotalAddrSize(true);
   }
+  std::cout << "addr size: " << total_addr_size <<", offset size: " << total_offset_size << "bytes,"
+  << " #thread: " << thread_num_per_machine << std::endl;
 
 #if PROBE_TP
   is_running = false;
