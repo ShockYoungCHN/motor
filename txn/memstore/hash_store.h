@@ -93,8 +93,15 @@ class HashStore {
     vpkg_size = TABLE_VALUE_SIZE[table_id] + sizeof(anchor_t) * 2;
     total_size = hash_table_size + (SLOT_NUM[table_id] * bucket_n) * vpkg_size;
 
+    std::function<double(size_t)> byte_to_MB = [](size_t size) {
+      return size / 1024.0 / 1024.0;
+    };
+    std::cout << "required" << byte_to_MB( (uint64_t)param->hash_store_start + param->alloc_offset + total_size-(uint64_t)param->mem_region_start) << "MB" <<
+      ", have " << byte_to_MB((uint64_t)param->mem_store_end-(uint64_t)param->mem_region_start) << "MB" << std::endl;
     if ((uint64_t)param->hash_store_start + param->alloc_offset + total_size >= (uint64_t)param->mem_store_end) {
-      RDMA_LOG(FATAL) << "memory region too small!";
+      RDMA_LOG(FATAL) << "memory region too small, "
+      "required" << byte_to_MB( (uint64_t)param->hash_store_start + param->alloc_offset + total_size-(uint64_t)param->mem_region_start) << "MB, "
+      << " but only have " << byte_to_MB((uint64_t)param->mem_store_end-(uint64_t)param->mem_region_start) << "MB";
     }
 
     // Addr of the hash table
