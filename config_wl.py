@@ -1,3 +1,5 @@
+# Author: Yuanzhuo Yang
+# This script is deprecated now!
 import os, json, sys
 import subprocess, socket
 
