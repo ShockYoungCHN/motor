@@ -6,8 +6,8 @@
     "num_district_per_warehouse": 10,
     "district_bkt_num": 10,
     
-    "num_customer_per_district": 3000,
-    "customer_bkt_num": 3500,
+    "num_customer_per_district": 300,
+    "customer_bkt_num": 350,
     
     "num_stock_per_warehouse": 10000,
     "stock_bkt_num": 20000,

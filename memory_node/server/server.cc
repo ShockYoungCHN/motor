@@ -20,6 +20,11 @@ void Server::AllocMem() {
     }
     // 0x80003 = MAP_SHARED_VALIDATE | MAP_SYNC. Some old kernel does not have sys/mman.h: MAP_SHARED_VALIDATE, MAP_SYNC
     mem_region = (char*)mmap(0, data_size + delta_size, PROT_READ | PROT_WRITE, 0x80003, pm_file_fd, 0);
+    if (mem_region == NULL) {
+      char error_message[100];
+      snprintf(error_message, sizeof(error_message), "malloc data size %lu, delta size %lu failed", data_size, delta_size);
+      perror(error_message);
+    }
 
     assert(mem_region);
 
@@ -27,6 +32,11 @@ void Server::AllocMem() {
 
   } else {
     mem_region = (char*)malloc(data_size + delta_size);
+    if (mem_region == NULL) {
+      char error_message[100];
+      snprintf(error_message, sizeof(error_message), "malloc data size %lu, delta size %lu failed", data_size, delta_size);
+      perror(error_message);
+    }
 
     assert(mem_region);
 

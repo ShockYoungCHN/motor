@@ -186,7 +186,7 @@ def configure_workload(wl_config_path, wl):
 def start_memory_pool(child):
     try:
         cd_command = f'cd ~/{txn}/build/memory_pool/server' if txn == "ford" else f'cd ~/{txn}/build/memory_node/server'
-        start_command = f'sudo numactl --cpunodebind={NUMA} --membind={NUMA} ./zm_mem_pool' if txn == "ford" else f'sudo numactl --cpunodebind={NUMA} --membind={NUMA} ./motor_mempool'
+        start_command = f'numactl --cpunodebind={NUMA} --membind={NUMA} ./zm_mem_pool' if txn == "ford" else f'numactl --cpunodebind={NUMA} --membind={NUMA} ./motor_mempool'
 
         child.sendline(cd_command)
         child.expect_exact('$')
@@ -214,6 +214,7 @@ def refresh_memory_pool(child):
 def quit_memory_pool(child, force=False):
     if force:
         child.sendline("sudo pkill -f motor_mempool")
+        child.sendline("sudo pkill -f zm_mem_pool")
         time.sleep(3)
         return
 
@@ -246,8 +247,9 @@ def run_workload_in_cluster(compute_child, memory_pool_children, txn, workload, 
     for (id, ip) in enumerate(memory_pool_hosts):
         configure_mn_config(proj_mn_config, memory_pool_hosts, list(range(mn_cnt)), ip, id, workload)
     configure_cn_config(proj_cn_config, memory_pool_hosts)
+    build_cmd = f"cd {proj_root} && {proj_root}/build.sh"+(" -d" if DEBUG else "")
     pool_threads = [Thread(target=run_command, args=(child,
-                                                     f"cd {proj_root} && {proj_root}/build.sh",
+                                                     build_cmd,
                                                      "-------------------- build finish ----------------------",))
                     for child in memory_pool_children+[compute_child]]
 
@@ -322,7 +324,10 @@ MEM_GB = 100  # 192GB is default, however 100GB is much faster since 192GB canno
 device = find_device_index("192.168.1.0", "255.255.255.0")
 delta_size = 200
 ATTEMPTS = 10000
-workloads = ["tpcc", "tatp", "smallbank"]
+workloads = ["tatp"]#, "tatp", "smallbank"]
+CORE_DUMP = False
+DEBUG = False
+EPOCH = 1
 
 combinations = generate_combinations(range(8, 33, 2), range(2, 3, 2))
 backup_num = 2  # cannot be 0
@@ -339,14 +344,24 @@ if __name__ == '__main__':
     compute_child = pexpect.spawn('bash', echo=False)
     for child in memory_pool_children+[compute_child]:
         check_and_install_packages(child)
-    # start logging
+
+    # start logging & core dump
     for child in memory_pool_children:
         child.sendline('script -f motor_mn.log')
+        if CORE_DUMP:
+            child.sendline('ulimit -c unlimited')
+        else:
+            child.sendline('ulimit -c 0')
     compute_child.sendline('script -f motor_cn.log')
+    if CORE_DUMP:
+        compute_child.sendline('ulimit -c unlimited')
+    else:
+        compute_child.sendline('ulimit -c 0')
+
     for ip in memory_pool_hosts:
         sync_files(f"{proj_root}", f"{os.path.dirname(proj_root)}", username, ip)
     for wl in workloads:
-        run_workload_in_cluster(compute_child, memory_pool_children, txn, wl, 1, combinations)
+        run_workload_in_cluster(compute_child, memory_pool_children, txn, wl, EPOCH, combinations)
     compute_child.close()
     for child in memory_pool_children:
         child.close()

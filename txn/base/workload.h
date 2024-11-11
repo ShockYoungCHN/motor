@@ -168,7 +168,7 @@ constexpr size_t TABLE_VALUE_SIZE[TATP_TOTAL_TABLES] =
         sizeof(tatp_callfwd_val_t)};
 
 constexpr size_t SLOT_NUM[TATP_TOTAL_TABLES] = {
-    1, 5, 5, 5, 5};
+    1, 8, 5, 5, 5}; // 1, 8, 5, 5, 6 if dataset *5; orginal: 1, 5, 5, 5, 5
 
 constexpr size_t ATTR_BAR_SIZE[TATP_TOTAL_TABLES] = {
     4 * MAX_VCELL_NUM + 2 * 1,  // according to the frequency
