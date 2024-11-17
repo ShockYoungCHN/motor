@@ -38,9 +38,6 @@ ABORT:
 bool TXN::Commit(coro_yield_t& yield) {
   // In MVCC, read-only txn directly commits
   if (read_write_set.empty()) {
-#if ACCESSED_ROWS
-    abort_accessed_rows[accessed_rows] ++;
-#endif
     return true;
   }
 
@@ -55,9 +52,6 @@ bool TXN::Commit(coro_yield_t& yield) {
 #if TX_PHASE_LATENCY
     validate_end = std::chrono::high_resolution_clock::now();
 #endif
-#if ACCESSED_ROWS
-    abort_accessed_rows[accessed_rows] ++;
-#endif
     Abort();
 #if TX_PHASE_LATENCY
     auto abort_end = std::chrono::high_resolution_clock::now();
@@ -70,9 +64,7 @@ bool TXN::Commit(coro_yield_t& yield) {
 #if TX_PHASE_LATENCY
   validate_end = std::chrono::high_resolution_clock::now();
 #endif
-#if ACCESSED_ROWS
-  commit_accessed_rows[accessed_rows] ++;
-#endif
+
   CommitAll();
 #if TX_PHASE_LATENCY
   commit_end = std::chrono::high_resolution_clock::now();

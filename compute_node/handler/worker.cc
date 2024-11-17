@@ -415,7 +415,12 @@ void RunTATP(coro_yield_t& yield, coro_id_t coro_id) {
         printf("Unexpected transaction type %d\n", static_cast<int>(tx_type));
         abort();
     }
-
+#if ACCESSED_ROWS
+    if (tx_committed)
+      txn->commit_accessed_rows[txn->accessed_rows] ++;
+    else
+      txn->abort_accessed_rows[txn->accessed_rows] ++;
+#endif
     /********************************** Stat begin *****************************************/
     // Stat after one transaction finishes
     if (tx_committed) {
@@ -500,7 +505,12 @@ void RunSmallBank(coro_yield_t& yield, coro_id_t coro_id) {
         printf("Unexpected transaction type %d\n", static_cast<int>(tx_type));
         abort();
     }
-
+#if ACCESSED_ROWS
+    if (tx_committed)
+      txn->commit_accessed_rows[txn->accessed_rows] ++;
+    else
+      txn->abort_accessed_rows[txn->accessed_rows] ++;
+#endif
     /********************************** Stat begin *****************************************/
     // Stat after one transaction finishes
     if (tx_committed) {
@@ -553,21 +563,45 @@ void RunTPCC(coro_yield_t& yield, coro_id_t coro_id, int finished_num) {
         thread_local_try_times[uint64_t(tx_type)]++;
         tx_committed = TxDelivery(tpcc_client, random_generator, yield, iter, txn);
         if (tx_committed) thread_local_commit_times[uint64_t(tx_type)]++;
+#if ACCESSED_ROWS
+          if (tx_committed)
+            txn->commit_accessed_rows[txn->accessed_rows] ++;
+          else
+            txn->abort_accessed_rows[txn->accessed_rows] ++;
+#endif
       } break;
       case TPCCTxType::kNewOrder: {
         thread_local_try_times[uint64_t(tx_type)]++;
         tx_committed = TxNewOrder(tpcc_client, random_generator, yield, iter, txn);
         if (tx_committed) thread_local_commit_times[uint64_t(tx_type)]++;
+#if ACCESSED_ROWS
+          if (tx_committed)
+            txn->commit_accessed_rows[txn->accessed_rows] ++;
+          else
+            txn->abort_accessed_rows[txn->accessed_rows] ++;
+#endif
       } break;
       case TPCCTxType::kOrderStatus: {
         thread_local_try_times[uint64_t(tx_type)]++;
         tx_committed = TxOrderStatus(tpcc_client, random_generator, yield, iter, txn);
         if (tx_committed) thread_local_commit_times[uint64_t(tx_type)]++;
+#if ACCESSED_ROWS
+          if (tx_committed)
+            txn->commit_accessed_rows[txn->accessed_rows] ++;
+          else
+            txn->abort_accessed_rows[txn->accessed_rows] ++;
+#endif
       } break;
       case TPCCTxType::kPayment: {
         thread_local_try_times[uint64_t(tx_type)]++;
         tx_committed = TxPayment(tpcc_client, random_generator, yield, iter, txn);
         if (tx_committed) thread_local_commit_times[uint64_t(tx_type)]++;
+#if ACCESSED_ROWS
+        if (tx_committed)
+          txn->commit_accessed_rows[txn->accessed_rows] ++;
+        else
+          txn->abort_accessed_rows[txn->accessed_rows] ++;
+#endif
       } break;
       case TPCCTxType::kStockLevel: {
         do {
@@ -578,6 +612,12 @@ void RunTPCC(coro_yield_t& yield, coro_id_t coro_id, int finished_num) {
           if (!tx_committed) {
             iter = ++tx_id_generator;
           }
+#if ACCESSED_ROWS
+          if (tx_committed)
+            txn->commit_accessed_rows[txn->accessed_rows] ++;
+          else
+            txn->abort_accessed_rows[txn->accessed_rows] ++;
+#endif
         } while (tx_committed != true);
         if (tx_committed) thread_local_commit_times[uint64_t(tx_type)]++;
       } break;
