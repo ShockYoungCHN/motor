@@ -106,14 +106,13 @@ bool TxGetNewDestination(TATP* tatp_client,
                                                       UserOP::kRead);
     txn->AddToReadOnlySet(callfwd_record[i]);
   }
-  // todo: when read a non-exist record, will execute return false? (tatp spec says it shouldn't)
-  if (!txn->Execute(yield)) return false;
+  // when read a non-exist record, tatp spec says it shouldn't abort, the original Motor's code is wrong!
+  if (!txn->Execute(yield, false)) return false;
   // read 1,2,3. 1 exists, if 2 non-exist, 3 will not be read (motor)
   // 1 exists, if 2 non-exist, 3 should be read
   bool callfwd_success = false;
 
   for (unsigned i = 0; i < cf_to_fetch; i++) {
-    // todo: verify this can never happen
     if (callfwd_record[i]->SizeofValue() == 0) {
       continue;
     }
@@ -299,7 +298,6 @@ bool TxInsertCallForwarding(TATP* tatp_client,
                             coro_yield_t& yield,
                             tx_id_t tx_id,
                             TXN* txn) {
-  // RDMA_LOG(DBG) << "coro " << txn->coro_id << " executes TxInsertCallForwarding, tx_id=" << tx_id;
   txn->Begin(tx_id, TXN_TYPE::kRWTxn, "InsertCallForwarding");
 
   uint32_t s_id = tatp_client->GetNonUniformRandomSubscriber(seed);
@@ -372,8 +370,13 @@ bool TxInsertCallForwarding(TATP* tatp_client,
   // Fill callfwd_val by user
   auto* callfwd_val = (tatp_callfwd_val_t*)callfwd_record->Value();
   if (!callfwd_record->IsRealInsert()) {
+    txn->TxAbortReadWrite();
+    return false;
+    /*
+     This is wrong by TATP spec, should abort!
     callfwd_record->SetUpdate(tatp_callfwd_val_bitmap::end_time, &callfwd_val->end_time, sizeof(callfwd_val->end_time));
     callfwd_record->SetUpdate(tatp_callfwd_val_bitmap::numberx, callfwd_val->numberx, sizeof(callfwd_val->numberx));
+    */
   }
   callfwd_val->end_time = end_time;
   callfwd_val->numberx[0] = tatp_callfwd_numberx0_magic;

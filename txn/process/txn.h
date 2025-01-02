@@ -95,6 +95,14 @@ class TXN {
     Clean();
   }
 
+  int read_write_set_size() {
+    return read_write_set.size();
+  }
+
+  int read_only_set_size() {
+    return read_only_set.size();
+  }
+
  private:
   // Internal transaction functions
   bool ExeRO(coro_yield_t& yield);  // Execute read-only transaction
@@ -160,7 +168,6 @@ class TXN {
   bool RDMAReadRoundTrip(RCQP* qp, char* rd_data, uint64_t remote_offset, size_t size);  // RDMA read wrapper
 
   void Clean();  // Clean data sets after commit/abort
-
  private:
   // For coroutine issues RDMA requests before yield
   bool IssueReadROCVT(std::vector<DirectRead>& pending_direct_ro,
@@ -271,22 +278,55 @@ class TXN {
 
   MetaManager* global_meta_man;  // Global metadata manager
 
+  CoroutineScheduler* coro_sched;  // Thread local coroutine scheduler
+
 #if TX_PHASE_LATENCY
   time_point<high_resolution_clock> start_ts;
-  std::vector<uint64_t> exe_latencies;
-  std::vector<uint64_t> commit_latencies;
-  std::vector<uint64_t> abort_latencies;
-  std::vector<uint64_t> validate_latencies;
+  time_point<high_resolution_clock> exec_end_ts;
+  Latency exe_succ_latencies[7];
+  Latency exe_fail_latencies[7];
+  Latency commit_latencies[7];
+  Latency abort_latencies[7];
+  Latency validate_succ_latencies[7];
+  Latency validate_fail_latencies[7];
+  // exec_succ_latencies and exe_fail_latencies store "us"
+  // this is because the former two's stored value is much larger, if more precision is needed, need to scale up the bucket in Latency class
+  Latency* exe_succ_lat;
+  Latency* exe_fail_lat;
+  Latency* commit_lat;
+  Latency* abort_lat;
+  Latency* validate_succ_lat;
+  Latency* validate_fail_lat;
+
+  void switch_lat(int tx_type)
+  {
+    exe_succ_lat = &exe_succ_latencies[tx_type];
+    exe_fail_lat = &exe_fail_latencies[tx_type];
+    commit_lat = &commit_latencies[tx_type];
+    abort_lat = &abort_latencies[tx_type];
+    validate_succ_lat = &validate_succ_latencies[tx_type];
+    validate_fail_lat = &validate_fail_latencies[tx_type];
+  }
 #endif
 
 #if ACCESSED_ROWS
   uint64_t accessed_rows = 0;
-  uint64_t commit_accessed_rows[1024];
-  uint64_t abort_accessed_rows[1024];
+  uint64_t txn_commit_accessed_rows[7][1024]={{0}};
+  uint64_t txn_abort_accessed_rows[7][1024]={{0}};
+  uint64_t* commit_accessed_rows;
+  uint64_t* abort_accessed_rows;
+  void switch_rows_counter(int tx_type)
+  {
+    commit_accessed_rows = txn_commit_accessed_rows[tx_type];
+    abort_accessed_rows = txn_abort_accessed_rows[tx_type];
+  }
+#endif
+#if DATA_ACCOUNTING
+  void switch_rtt_latencies(int tx_type){
+    coro_sched->switch_rtt_latencies(tx_type);
+  }
 #endif
  private:
-  CoroutineScheduler* coro_sched;  // Thread local coroutine scheduler
-
   QPManager* thread_qp_man;  // Thread local qp connection manager. Each transaction thread has one
 
   // Thread local RDMA buffer allocator
@@ -338,6 +378,7 @@ void TXN::Begin(tx_id_t txid, TXN_TYPE txn_t, const std::string& name) {
 #endif
 #if TX_PHASE_LATENCY
   start_ts = high_resolution_clock::now();
+  exec_end_ts = start_ts;
 #endif
 
   thread_locked_key_table[coro_id].num_entry = 0;
@@ -349,9 +390,6 @@ void TXN::AddToReadOnlySet(DataSetItemPtr item) {
 #if OUTPUT_KEY_STAT
   key_counter.RegKey(t_id, KeyType::kKeyRead, txn_name, item->header.table_id, item->header.key);
 #endif
-#if ACCESSED_ROWS
-  accessed_rows++;
-#endif
   read_only_set.emplace_back(item);
 }
 
@@ -359,9 +397,6 @@ ALWAYS_INLINE
 void TXN::AddToReadWriteSet(DataSetItemPtr item) {
 #if OUTPUT_KEY_STAT
   key_counter.RegKey(t_id, KeyType::kKeyWrite, txn_name, item->header.table_id, item->header.key);
-#endif
-#if ACCESSED_ROWS
-  accessed_rows++;
 #endif
   read_write_set.emplace_back(item);
 }

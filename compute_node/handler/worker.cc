@@ -40,21 +40,26 @@ extern std::vector<double> avg_lat;
 extern std::vector<double> medianlat_vec;
 extern std::vector<double> taillat_vec;
 extern std::vector<double> delta_usage;
+
 #if DATA_ACCOUNTING
 extern std::vector<uint64_t> read_bytes;
 extern std::vector<uint64_t> write_bytes;
 extern std::vector<uint64_t> read_cnts;
 extern std::vector<uint64_t> write_cnts;
-extern std::vector<std::array<uint64_t, 3>> hash_latency;
-extern std::vector<std::array<uint64_t, 3>> val_latency;
+extern Latency rw_hash_latency[7];
+extern Latency rw_val_latency[7];
+extern Latency ro_hash_latency[7];
+extern Latency ro_val_latency[7];
 extern std::vector<uint64_t> CAS_cnts;
 #endif
 
 #if TX_PHASE_LATENCY
-extern std::vector<std::array<uint64_t, 3>> exe_latencies;
-extern std::vector<std::array<uint64_t, 3>> validate_latencies;
-extern std::vector<std::array<uint64_t, 3>> commit_latencies;
-extern std::vector<std::array<uint64_t, 3>> abort_latencies;
+Latency exe_succ_latencies[7];
+Latency exe_fail_latencies[7];
+Latency validate_succ_latencies[7];
+Latency validate_fail_latencies[7];
+Latency commit_latencies[7];
+Latency abort_latencies[7];
 #endif
 
 extern std::vector<uint64_t> total_try_times;
@@ -209,17 +214,34 @@ std::vector<T> calculatePercentilesForAll(std::vector<std::vector<T>>& timers, c
       continue;
     }
     auto res = calculatePercentiles(timers[i], percentiles);
-    printf("Txn type %zu: p50=%f, p99=%f\n", i, static_cast<double>(res[0]), static_cast<double>(res[1]));
     all_data.insert(all_data.end(), timers[i].begin(), timers[i].end());
   }
   return calculatePercentiles(all_data, percentiles);
 }
 
 void RecordTpLat(double msr_sec, TXN* txn) {
+#if WORKLOAD_SmallBank
+  std::vector<std::string> tx_names = std::vector<std::string>(SmallBank_TX_NAME, SmallBank_TX_NAME + SmallBank_TX_TYPES);
+#elif  WORKLOAD_TATP
+  std::vector<std::string> tx_names = std::vector<std::string>(TATP_TX_NAME, TATP_TX_NAME + TATP_TX_TYPES);
+#elif WORKLOAD_TPCC
+  std::vector<std::string> tx_names = std::vector<std::string>(TPCC_TX_NAME, TPCC_TX_NAME + TPCC_TX_TYPES);
+#endif
+
   double attemp_tput = (double)stat_attempted_tx_total / msr_sec;
   double tx_tput = (double)stat_committed_tx_total / msr_sec;
 
   auto res = calculatePercentilesForAll(timers, {50.0, 99.0});
+  if (txn->t_id==0)
+  {
+    for (size_t i = 0; i < tx_names.size(); i++)
+    {
+        auto res = calculatePercentiles(timers[i], {50.0, 99.0});
+        auto p50=static_cast<double>(res[0]); auto p99=static_cast<double>(res[1]);
+        auto avg = std::accumulate(timers[i].begin(), timers[i].end(), 0.0) / timers[i].size();
+        printf("%s: p50=%.1f, p99=%.1f, avg=%.1f\n", tx_names[i].c_str(), p50, p99, avg);
+    }
+  }
   // calculate the timers avg
   double avg = 0;
   double sum = 0;
@@ -245,65 +267,29 @@ void RecordTpLat(double msr_sec, TXN* txn) {
   read_cnts.push_back(coro_sched->read_count);
   write_cnts.push_back(coro_sched->write_count);
   CAS_cnts.push_back(coro_sched->CAS_count);
-  std::sort(coro_sched->hash_durs.begin(), coro_sched->hash_durs.end(),
-          [](const std::pair<int, double>& a, const std::pair<int, double>& b) {
-              return a.first < b.first;
-          });
-  std::sort(coro_sched->val_durs.begin(), coro_sched->val_durs.end(),
-          [](const std::pair<int, double>& a, const std::pair<int, double>& b) {
-              return a.first < b.first;
-          });
-
-  auto durs1 = calculatePercentiles(coro_sched->hash_durs, {50.0, 99.0});
-  auto avg1 = std::accumulate(coro_sched->hash_durs.begin(), coro_sched->hash_durs.end(), 0.0,
-    [](double sum, const std::pair<uint64_t, int>& p) {
-        return sum + static_cast<double>(p.first) * p.second;
-    }) /
-    std::accumulate(coro_sched->hash_durs.begin(), coro_sched->hash_durs.end(), 0.0,
-        [](double sum, const std::pair<uint64_t, int>& p) {
-            return sum + p.second;
-        });
-  hash_latency.push_back(std::array<uint64_t, 3>{durs1[0], durs1[1], avg1});
-
-  auto durs2 = calculatePercentiles(coro_sched->val_durs, {50.0, 99.0});
-  auto avg2 = std::accumulate(coro_sched->val_durs.begin(), coro_sched->val_durs.end(), 0.0,
-    [](double sum, const std::pair<uint64_t, int>& p) {
-        return sum + static_cast<double>(p.first) * p.second;
-    }) /
-    std::accumulate(coro_sched->val_durs.begin(), coro_sched->val_durs.end(), 0.0,
-        [](double sum, const std::pair<uint64_t, int>& p) {
-            return sum + p.second;
-        });
-  val_latency.push_back(std::array<uint64_t, 3>{durs2[0], durs2[1], avg2});
-
+  if (txn->t_id==0)
+  {
+    for (size_t i = 0; i < tx_names.size(); i++)
+    {
+      txn->switch_rtt_latencies(i);
+      rw_hash_latency[i]+=*txn->coro_sched->rw_hash_lat;
+      rw_val_latency[i]+=*txn->coro_sched->rw_val_lat;
+      ro_hash_latency[i]+=*txn->coro_sched->ro_hash_lat;
+      ro_val_latency[i]+=*txn->coro_sched->ro_val_lat;
+    }
+  }
 #endif
 
 #if TX_PHASE_LATENCY
-  // each coro has a txn, each txn has a series of phase latency
-  auto exe_lat = calculatePercentiles(txn->exe_latencies, {50.0, 99.0});
-  auto exe_avg = txn->exe_latencies.empty()
-                 ? 0
-                 :std::accumulate(txn->exe_latencies.begin(), txn->exe_latencies.end(), 0) / txn->exe_latencies.size();
-
-  auto validate_lat = calculatePercentiles(txn->validate_latencies, {50.0, 99.0});
-  auto validate_avg = txn->validate_latencies.empty()
-                 ? 0
-                 :std::accumulate(txn->validate_latencies.begin(), txn->validate_latencies.end(), 0) / txn->validate_latencies.size();
-
-  auto commit_lat = calculatePercentiles(txn->commit_latencies, {50.0, 99.0});
-  auto commit_avg =txn->commit_latencies.empty()
-                 ? 0
-                 :std::accumulate(txn->commit_latencies.begin(), txn->commit_latencies.end(), 0) / txn->commit_latencies.size();
-
-  auto abort_lat = calculatePercentiles(txn->abort_latencies, {50.0, 99.0});
-  auto abort_avg = txn->abort_latencies.empty()
-                 ? 0
-                 : std::accumulate(txn->abort_latencies.begin(), txn->abort_latencies.end(), 0) / txn->abort_latencies.size();
-
-  exe_latencies.push_back(std::array<uint64_t, 3>{exe_lat[0], exe_lat[1], exe_avg});
-  validate_latencies.push_back(std::array<uint64_t, 3>{validate_lat[0], validate_lat[1], validate_avg});
-  commit_latencies.push_back(std::array<uint64_t, 3>{commit_lat[0], commit_lat[1], commit_avg});
-  abort_latencies.push_back(std::array<uint64_t, 3>{abort_lat[0], abort_lat[1], abort_avg});
+  for (size_t i = 0; i < timers.size(); i++) {
+    txn->switch_lat(i);
+    exe_succ_latencies[i] += *txn->exe_succ_lat;
+    exe_fail_latencies[i] += *txn->exe_fail_lat;
+    validate_succ_latencies[i] += *txn->validate_succ_lat;
+    validate_fail_latencies[i] += *txn->validate_fail_lat;
+    commit_latencies[i] += *txn->commit_lat;
+    abort_latencies[i] += *txn->abort_lat;
+  }
 #endif
   for (size_t i = 0; i < total_try_times.size(); i++) {
     // Records the total number of tried and committed txn in all threads
@@ -337,11 +323,19 @@ void RecordTpLat(double msr_sec, TXN* txn) {
       weighted_sum += data[i] * i;
 
     auto sum = std::accumulate(data, data + data_len, 0ULL);
-    return  sum==0?0:weighted_sum/sum;
+    return sum==0?0:weighted_sum/sum;
   };
-  printf("p50 p99 avg\n");
-  printf("commit: %d %d %lu\n", getPercentile(txn->commit_accessed_rows, 1024, 0.5), getPercentile(txn->commit_accessed_rows, 1024, 0.99), getAvg(txn->commit_accessed_rows, 1024));
-  printf("abort: %d %d %lu\n", getPercentile(txn->abort_accessed_rows, 1024, 0.5), getPercentile(txn->abort_accessed_rows, 1024, 0.99), getAvg(txn->abort_accessed_rows, 1024));
+  if (txn->t_id==0)
+  {
+    for (size_t i = 0; i < tx_names.size(); i++)
+    {
+      txn->switch_rows_counter(i);
+      printf("%s_accessed_rows committed aborted\n", tx_names[i].c_str());
+      printf("p50 %d %d\n", getPercentile(txn->commit_accessed_rows, 1024, 0.5), getPercentile(txn->abort_accessed_rows, 1024, 0.5));
+      printf("p99 %d %d\n", getPercentile(txn->commit_accessed_rows, 1024, 0.99), getPercentile(txn->abort_accessed_rows, 1024, 0.99));
+      printf("avg %d %d\n", getAvg(txn->commit_accessed_rows, 1024), getAvg(txn->abort_accessed_rows, 1024));
+    }
+  }
 #endif
 }
 
@@ -368,6 +362,15 @@ void RunTATP(coro_yield_t& yield, coro_id_t coro_id) {
     uint64_t iter = ++tx_id_generator;  // Global atomic transaction id
     stat_attempted_tx_total++;
     clock_gettime(CLOCK_REALTIME, &tx_start_time);
+#if TX_PHASE_LATENCY
+    txn->switch_lat((int)tx_type);
+#endif
+#if ACCESSED_ROWS
+    txn->switch_rows_counter((int)tx_type);
+#endif
+#if DATA_ACCOUNTING
+    txn->switch_rtt_latencies((int)tx_type);
+#endif
     switch (tx_type) {
       case TATPTxType::kGetSubsciberData: {
         thread_local_try_times[uint64_t(tx_type)]++;
@@ -421,6 +424,13 @@ void RunTATP(coro_yield_t& yield, coro_id_t coro_id) {
     else
       txn->abort_accessed_rows[txn->accessed_rows] ++;
 #endif
+#if TX_PHASE_LATENCY
+    if (!tx_committed)
+    {
+      txn->exec_end_ts = txn->start_ts==txn->exec_end_ts?std::chrono::high_resolution_clock::now():txn->exec_end_ts;
+      txn->exe_fail_lat->update(std::chrono::duration_cast<std::chrono::nanoseconds>(txn->exec_end_ts - txn->start_ts).count()/1000);
+    }
+#endif
     /********************************** Stat begin *****************************************/
     // Stat after one transaction finishes
     if (tx_committed) {
@@ -464,6 +474,15 @@ void RunSmallBank(coro_yield_t& yield, coro_id_t coro_id) {
     uint64_t iter = ++tx_id_generator;  // Global atomic transaction id
     stat_attempted_tx_total++;
     clock_gettime(CLOCK_REALTIME, &tx_start_time);
+#if TX_PHASE_LATENCY
+    txn->switch_lat((int)tx_type);
+#endif
+#if ACCESSED_ROWS
+    txn->switch_rows_counter((int)tx_type);
+#endif
+#if DATA_ACCOUNTING
+    txn->switch_rtt_latencies((int)tx_type);
+#endif
     switch (tx_type) {
       case SmallBankTxType::kAmalgamate: {
         thread_local_try_times[uint64_t(tx_type)]++;
@@ -510,6 +529,13 @@ void RunSmallBank(coro_yield_t& yield, coro_id_t coro_id) {
       txn->commit_accessed_rows[txn->accessed_rows] ++;
     else
       txn->abort_accessed_rows[txn->accessed_rows] ++;
+#endif
+#if TX_PHASE_LATENCY
+    if (!tx_committed)
+    {
+      txn->exec_end_ts = txn->start_ts==txn->exec_end_ts?std::chrono::high_resolution_clock::now():txn->exec_end_ts;
+      txn->exe_fail_lat->update(std::chrono::duration_cast<std::chrono::nanoseconds>(txn->exec_end_ts - txn->start_ts).count()/1000);
+    }
 #endif
     /********************************** Stat begin *****************************************/
     // Stat after one transaction finishes
@@ -558,16 +584,36 @@ void RunTPCC(coro_yield_t& yield, coro_id_t coro_id, int finished_num) {
     // TLOG(INFO, thread_gid) << "Thread " << thread_gid << " attemps txn " << stat_attempted_tx_total << " txn id: " << iter;
 
     clock_gettime(CLOCK_REALTIME, &tx_start_time);
+
+    // todo: doesn't work with multiple coroutines(#coro>2)
+#if TX_PHASE_LATENCY
+    txn->switch_lat((int)tx_type);
+#endif
+#if ACCESSED_ROWS
+    txn->switch_rows_counter((int)tx_type);
+#endif
+#if DATA_ACCOUNTING
+    txn->switch_rtt_latencies((int)tx_type);
+#endif
     switch (tx_type) {
       case TPCCTxType::kDelivery: {
         thread_local_try_times[uint64_t(tx_type)]++;
         tx_committed = TxDelivery(tpcc_client, random_generator, yield, iter, txn);
         if (tx_committed) thread_local_commit_times[uint64_t(tx_type)]++;
 #if ACCESSED_ROWS
-          if (tx_committed)
-            txn->commit_accessed_rows[txn->accessed_rows] ++;
-          else
-            txn->abort_accessed_rows[txn->accessed_rows] ++;
+        txn->accessed_rows = txn->read_only_set_size()+txn->read_write_set_size();
+        if (tx_committed)
+          txn->commit_accessed_rows[txn->accessed_rows] ++;
+        else
+          txn->abort_accessed_rows[txn->accessed_rows] ++;
+#endif
+#if TX_PHASE_LATENCY
+          // if failed, exe_fail_lat is updated here(cannot update in commit function, as some txn just quit without commit)
+        if (!tx_committed)
+        {
+          txn->exec_end_ts = txn->start_ts==txn->exec_end_ts?std::chrono::high_resolution_clock::now():txn->exec_end_ts;
+          txn->exe_fail_lat->update(std::chrono::duration_cast<std::chrono::nanoseconds>(txn->exec_end_ts - txn->start_ts).count()/1000);
+        }
 #endif
       } break;
       case TPCCTxType::kNewOrder: {
@@ -575,10 +621,18 @@ void RunTPCC(coro_yield_t& yield, coro_id_t coro_id, int finished_num) {
         tx_committed = TxNewOrder(tpcc_client, random_generator, yield, iter, txn);
         if (tx_committed) thread_local_commit_times[uint64_t(tx_type)]++;
 #if ACCESSED_ROWS
-          if (tx_committed)
-            txn->commit_accessed_rows[txn->accessed_rows] ++;
-          else
-            txn->abort_accessed_rows[txn->accessed_rows] ++;
+        txn->accessed_rows = txn->read_only_set_size()+txn->read_write_set_size();
+        if (tx_committed)
+          txn->commit_accessed_rows[txn->accessed_rows] ++;
+        else
+          txn->abort_accessed_rows[txn->accessed_rows] ++;
+#endif
+#if TX_PHASE_LATENCY
+        if (!tx_committed)
+        {
+          txn->exec_end_ts = txn->start_ts==txn->exec_end_ts?std::chrono::high_resolution_clock::now():txn->exec_end_ts;
+          txn->exe_fail_lat->update(std::chrono::duration_cast<std::chrono::nanoseconds>(txn->exec_end_ts - txn->start_ts).count()/1000);
+        }
 #endif
       } break;
       case TPCCTxType::kOrderStatus: {
@@ -586,10 +640,18 @@ void RunTPCC(coro_yield_t& yield, coro_id_t coro_id, int finished_num) {
         tx_committed = TxOrderStatus(tpcc_client, random_generator, yield, iter, txn);
         if (tx_committed) thread_local_commit_times[uint64_t(tx_type)]++;
 #if ACCESSED_ROWS
-          if (tx_committed)
-            txn->commit_accessed_rows[txn->accessed_rows] ++;
-          else
-            txn->abort_accessed_rows[txn->accessed_rows] ++;
+        txn->accessed_rows = txn->read_only_set_size()+txn->read_write_set_size();
+        if (tx_committed)
+          txn->commit_accessed_rows[txn->accessed_rows] ++;
+        else
+          txn->abort_accessed_rows[txn->accessed_rows] ++;
+#endif
+#if TX_PHASE_LATENCY
+        if (!tx_committed)
+        {
+          txn->exec_end_ts = txn->start_ts==txn->exec_end_ts?std::chrono::high_resolution_clock::now():txn->exec_end_ts;
+          txn->exe_fail_lat->update(std::chrono::duration_cast<std::chrono::nanoseconds>(txn->exec_end_ts - txn->start_ts).count()/1000);
+        }
 #endif
       } break;
       case TPCCTxType::kPayment: {
@@ -597,10 +659,18 @@ void RunTPCC(coro_yield_t& yield, coro_id_t coro_id, int finished_num) {
         tx_committed = TxPayment(tpcc_client, random_generator, yield, iter, txn);
         if (tx_committed) thread_local_commit_times[uint64_t(tx_type)]++;
 #if ACCESSED_ROWS
+        txn->accessed_rows = txn->read_only_set_size()+txn->read_write_set_size();
         if (tx_committed)
           txn->commit_accessed_rows[txn->accessed_rows] ++;
         else
           txn->abort_accessed_rows[txn->accessed_rows] ++;
+#endif
+#if TX_PHASE_LATENCY
+        if (!tx_committed)
+        {
+          txn->exec_end_ts = txn->start_ts==txn->exec_end_ts?std::chrono::high_resolution_clock::now():txn->exec_end_ts;
+          txn->exe_fail_lat->update(std::chrono::duration_cast<std::chrono::nanoseconds>(txn->exec_end_ts - txn->start_ts).count()/1000);
+        }
 #endif
       } break;
       case TPCCTxType::kStockLevel: {
@@ -613,10 +683,18 @@ void RunTPCC(coro_yield_t& yield, coro_id_t coro_id, int finished_num) {
             iter = ++tx_id_generator;
           }
 #if ACCESSED_ROWS
+          txn->accessed_rows = txn->read_only_set_size()+txn->read_write_set_size();
           if (tx_committed)
             txn->commit_accessed_rows[txn->accessed_rows] ++;
           else
             txn->abort_accessed_rows[txn->accessed_rows] ++;
+#endif
+#if TX_PHASE_LATENCY
+          if (!tx_committed)
+          {
+            txn->exec_end_ts = txn->start_ts==txn->exec_end_ts?std::chrono::high_resolution_clock::now():txn->exec_end_ts;
+            txn->exe_fail_lat->update(std::chrono::duration_cast<std::chrono::nanoseconds>(txn->exec_end_ts - txn->start_ts).count()/1000);
+          }
 #endif
         } while (tx_committed != true);
         if (tx_committed) thread_local_commit_times[uint64_t(tx_type)]++;
@@ -852,15 +930,31 @@ void run_thread(thread_params* params,
     } else {
       if (bench_name == "tatp") {
         timers = std::vector<std::vector<double>>(TATP_TX_TYPES);
+        for (int i = 0; i < TATP_TX_TYPES; i++)
+        {
+          timers[i].reserve(ATTEMPTED_NUM/2);
+        }
         coro_sched->coro_array[coro_i].func = coro_call_t(bind(RunTATP, _1, coro_i));
       } else if (bench_name == "smallbank") {
         timers = std::vector<std::vector<double>>(SmallBank_TX_TYPES);
+        for (int i = 0; i < SmallBank_TX_TYPES; i++)
+        {
+          timers[i].reserve(ATTEMPTED_NUM/2);
+        }
         coro_sched->coro_array[coro_i].func = coro_call_t(bind(RunSmallBank, _1, coro_i));
       } else if (bench_name == "tpcc") {
         timers = std::vector<std::vector<double>>(TPCC_TX_TYPES);
+        for (int i = 0; i < TPCC_TX_TYPES; i++)
+        {
+          timers[i].reserve(ATTEMPTED_NUM/2);
+        }
         coro_sched->coro_array[coro_i].func = coro_call_t(bind(RunTPCC, _1, coro_i, 0));
       } else if (bench_name == "micro") {
         timers = std::vector<std::vector<double>>(MICRO_TX_TYPES);
+        for (int i = 0; i < MICRO_TX_TYPES; i++)
+        {
+          timers[i].reserve(ATTEMPTED_NUM/2);
+        }
         coro_sched->coro_array[coro_i].func = coro_call_t(bind(RunMICRO, _1, coro_i));
       }
     }

@@ -90,8 +90,21 @@ class CoroutineScheduler {
   uint64_t CAS_count;
   time_point<high_resolution_clock> hash_ts;
   time_point<high_resolution_clock> val_ts;
-  std::vector<std::pair<uint64_t, int>> hash_durs;
-  std::vector<std::pair<uint64_t,int>> val_durs;
+  Latency rw_hash_latencies[7];
+  Latency rw_val_latencies[7];
+  Latency ro_hash_latencies[7];
+  Latency ro_val_latencies[7];
+  Latency* rw_hash_lat;
+  Latency* rw_val_lat;
+  Latency* ro_hash_lat;
+  Latency* ro_val_lat;
+
+  void switch_rtt_latencies(int tx_type){
+    rw_hash_lat = &rw_hash_latencies[tx_type];
+    rw_val_lat = &rw_val_latencies[tx_type];
+    ro_hash_lat = &ro_hash_latencies[tx_type];
+    ro_val_lat = &ro_val_latencies[tx_type];
+  }
 #endif
 
  private:
