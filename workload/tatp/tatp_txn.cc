@@ -106,7 +106,8 @@ bool TxGetNewDestination(TATP* tatp_client,
                                                       UserOP::kRead);
     txn->AddToReadOnlySet(callfwd_record[i]);
   }
-  // when read a non-exist record, tatp spec says it shouldn't abort, the original Motor's code is wrong!
+  // TODO: when read a non-exist record, tatp spec says it shouldn't abort, the original Motor's code is wrong!
+  // however, the change is not trivial, so I left it as is
   if (!txn->Execute(yield, false)) return false;
   // read 1,2,3. 1 exists, if 2 non-exist, 3 will not be read (motor)
   // 1 exists, if 2 non-exist, 3 should be read

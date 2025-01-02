@@ -47,6 +47,8 @@ class TXN {
 
   void AddToReadOnlySet(DataSetItemPtr item);
 
+  std::vector<DataSetItemPtr>& GetReadOnlySet();
+
   void AddToReadWriteSet(DataSetItemPtr item);
 
   bool Execute(coro_yield_t& yield, bool fail_abort = true);
@@ -391,6 +393,13 @@ void TXN::AddToReadOnlySet(DataSetItemPtr item) {
   key_counter.RegKey(t_id, KeyType::kKeyRead, txn_name, item->header.table_id, item->header.key);
 #endif
   read_only_set.emplace_back(item);
+}
+
+// a filthy hack to get the read-only set, used for TxGetNewDestination in TATP
+ALWAYS_INLINE
+std::vector<DataSetItemPtr>& TXN::GetReadOnlySet()
+{
+  return read_only_set;
 }
 
 ALWAYS_INLINE
