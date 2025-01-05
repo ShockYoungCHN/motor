@@ -585,7 +585,7 @@ void RunTPCC(coro_yield_t& yield, coro_id_t coro_id, int finished_num) {
 
     clock_gettime(CLOCK_REALTIME, &tx_start_time);
 
-    // todo: doesn't work with multiple coroutines(#coro>2)
+    // todo: TX_PHASE_LATENCY macro doesn't work with multiple coroutines(#coro>2)
 #if TX_PHASE_LATENCY
     txn->switch_lat((int)tx_type);
 #endif

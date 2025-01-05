@@ -608,16 +608,34 @@ void Handler::OutputResult(std::string bench_name, std::string system_name) {
     of_data_accounting << "avg" << " " << exe_succ_lat << " " << exe_fail_lat << " " << val_succ_lat << " " << val_fail_lat << " " << com_lat << " " << abo_lat << std::endl;
   }
 #elif TX_PHASE_LATENCY == 0 && DATA_ACCOUNTING == 1
-  // p50 and p99 of hash and val latency are not accurate
-  of_data_accounting << "rw_latency hash val" << std::endl;
-  of_data_accounting << "p50" << " " << rw_hash_latency[i].perc(0.5)/10.0 << " " << rw_val_latency[i].perc(0.5)/10.0 << std::endl;
-  of_data_accounting << "p99" << " " << rw_hash_latency[i].perc(0.99)/10.0 << " " << rw_val_latency[i].perc(0.99)/10.0 << std::endl;
-  of_data_accounting << "avg" << " " << rw_hash_latency[i].avg()/10.0 << " " << rw_val_latency[i].avg()/10.0 << std::endl;
-  of_data_accounting << "ro_latency hash val" << std::endl;
-  of_data_accounting << "p50" << " " << ro_hash_latency[i].perc(0.5)/10.0 << " " << ro_val_latency[i].perc(0.5)/10.0 << std::endl;
-  of_data_accounting << "p99" << " " << ro_hash_latency[i].perc(0.99)/10.0 << " " << ro_val_latency[i].perc(0.99)/10.0 << std::endl;
-  of_data_accounting << "avg" << " " << ro_hash_latency[i].avg()/10.0 << " " << ro_val_latency[i].avg()/10.0 << std::endl;
-  of_data_accounting << std::endl;
+  Latency total_rw_hash_latency;
+  Latency total_rw_val_latency;
+  Latency total_ro_hash_latency;
+  Latency total_ro_val_latency;
+  for (int i=0; i<tx_names.size(); i++)
+  {
+    total_rw_hash_latency+=rw_hash_latency[i];
+    total_rw_val_latency+=rw_val_latency[i];
+    total_ro_hash_latency+=ro_hash_latency[i];
+    total_ro_val_latency+=ro_val_latency[i];
+    of_data_accounting << tx_names[i] << "_rw_latency hash val" << std::endl;
+    of_data_accounting << "p50" << " " << rw_hash_latency[i].perc(0.5)/10.0 << " " << rw_val_latency[i].perc(0.5)/10.0 << std::endl;
+    of_data_accounting << "p99" << " " << rw_hash_latency[i].perc(0.99)/10.0 << " " << rw_val_latency[i].perc(0.99)/10.0 << std::endl;
+    of_data_accounting << "avg" << " " << rw_hash_latency[i].avg()/10.0 << " " << rw_val_latency[i].avg()/10.0 << std::endl;
+    of_data_accounting << tx_names[i] << "_ro_latency hash val" << std::endl;
+    of_data_accounting << "p50" << " " << ro_hash_latency[i].perc(0.5)/10.0 << " " << ro_val_latency[i].perc(0.5)/10.0 << std::endl;
+    of_data_accounting << "p99" << " " << ro_hash_latency[i].perc(0.99)/10.0 << " " << ro_val_latency[i].perc(0.99)/10.0 << std::endl;
+    of_data_accounting << "avg" << " " << ro_hash_latency[i].avg()/10.0 << " " << ro_val_latency[i].avg()/10.0 << std::endl;
+  }
+  of_data_accounting << "total_rw_latency hash val" << std::endl;
+  of_data_accounting << "p50" << " " << total_rw_hash_latency.perc(0.5)/10.0 << " " << total_rw_val_latency.perc(0.5)/10.0 << std::endl;
+  of_data_accounting << "p99" << " " << total_rw_hash_latency.perc(0.99)/10.0 << " " << total_rw_val_latency.perc(0.99)/10.0 << std::endl;
+  of_data_accounting << "avg" << " " << total_rw_hash_latency.avg()/10.0 << " " << total_rw_val_latency.avg()/10.0 << std::endl;
+
+  of_data_accounting << "total_ro_latency hash val" << std::endl;
+  of_data_accounting << "p50" << " " << total_ro_hash_latency.perc(0.5)/10.0 << " " << total_ro_val_latency.perc(0.5)/10.0 << std::endl;
+  of_data_accounting << "p99" << " " << total_ro_hash_latency.perc(0.99)/10.0 << " " << total_ro_val_latency.perc(0.99)/10.0 << std::endl;
+  of_data_accounting << "avg" << " " << total_ro_hash_latency.avg()/10.0 << " " << total_ro_val_latency.avg()/10.0 << std::endl;
 #elif TX_PHASE_LATENCY == 1 && DATA_ACCOUNTING == 1
   for (int i=0; i<tx_names.size(); i++)
   {
