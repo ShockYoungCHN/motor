@@ -4,6 +4,7 @@ import pexpect
 import time, os
 from threading import Thread
 from device import find_device_index
+from ib_counters import IBCounterMonitor
 
 ######################################### utils ####################################################
 packages = {
@@ -280,8 +281,16 @@ def run_workload_in_cluster(compute_child, memory_pool_children, txn, workload, 
                 raise Exception("Invalid transaction type")
 
             print(f"Running command on compute node: {command}")
+            if IB_COUNTERS:
+                ibMonitor.start()
+
             run_command(compute_child, cd_and_run)
 
+            if IB_COUNTERS:
+                ibMonitor.end()
+                hw_counters_diff, counters_diff = ibMonitor.get_counters_diff()
+                print(f"HW Counters diff: {hw_counters_diff}")
+                print(f"Counters diff: {counters_diff}")
             print(f"(thread, coroutine): ({threads}, {coroutines}) finished")
 
             # only refresh memory pool if it's not the last epoch and last combination
@@ -327,10 +336,12 @@ ATTEMPTS = 1000_000 # default 1000_000
 workloads = ["tpcc", "tatp", "smallbank"]
 CORE_DUMP = False
 DEBUG = False
+IB_COUNTERS = False
 EPOCH = 2
 
 combinations = generate_combinations(range(8, 33, 2), range(2, 3, 2))
 backup_num = 2  # cannot be 0
+ibMonitor = IBCounterMonitor(device.device_name)
 
 if __name__ == '__main__':
     generate_ssh_config(username, private_key_path, '/users/samuraiy/.ssh/config')

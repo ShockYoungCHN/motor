@@ -5,9 +5,10 @@ import re
 from typing import Optional
 
 class RDMADeviceInfo:
-    def __init__(self, port_num: int, device_index: int):
+    def __init__(self, port_num: int, device_index: int, device_name: str):
         self.port_num = port_num
         self.device_index = device_index
+        self.device_name = device_name
 
 def is_ip_in_subnet(ip: str, subnet: str, mask: str) -> bool:
     ip_addr = struct.unpack('!I', socket.inet_aton(ip))[0]
@@ -31,7 +32,7 @@ def get_ip_address(iface: str) -> Optional[str]:
     return None
 
 def find_device_index(subnet: str, mask: str) -> RDMADeviceInfo:
-    dev_info = RDMADeviceInfo(0, -1)
+    dev_info = RDMADeviceInfo(0, -1, "")
     output = execute_command("ibdev2netdev")
     if not output:
         return dev_info
@@ -67,5 +68,6 @@ def find_device_index(subnet: str, mask: str) -> RDMADeviceInfo:
                         idx = dev_list.index(mlx_name)
                         dev_info.port_num = port
                         dev_info.device_index = idx
+                        dev_info.device_name = mlx_name
                         return dev_info
     return dev_info
