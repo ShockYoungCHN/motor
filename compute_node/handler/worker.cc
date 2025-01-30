@@ -50,6 +50,7 @@ extern Latency rw_hash_latency[7];
 extern Latency rw_val_latency[7];
 extern Latency ro_hash_latency[7];
 extern Latency ro_val_latency[7];
+extern Latency poll_cq_latency[7];
 extern std::vector<uint64_t> CAS_cnts;
 #endif
 
@@ -276,6 +277,7 @@ void RecordTpLat(double msr_sec, TXN* txn) {
       rw_val_latency[i]+=*txn->coro_sched->rw_val_lat;
       ro_hash_latency[i]+=*txn->coro_sched->ro_hash_lat;
       ro_val_latency[i]+=*txn->coro_sched->ro_val_lat;
+      poll_cq_latency[i] += *txn->coro_sched->poll_cq_lat;
     }
   }
 #endif

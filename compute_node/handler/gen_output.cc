@@ -44,6 +44,7 @@ Latency rw_hash_latency[7];
 Latency rw_val_latency[7];
 Latency ro_hash_latency[7];
 Latency ro_val_latency[7];
+Latency poll_cq_latency[7];
 #endif
 
 #if TX_PHASE_LATENCY
@@ -640,7 +641,6 @@ void Handler::OutputResult(std::string bench_name, std::string system_name) {
   for (int i=0; i<tx_names.size(); i++)
   {
     of_data_accounting << tx_names[i] << " exec_succ_latency exec_fail_latency validate_succ_latency validate_fail_latency commit_latency abort_latency" << std::endl;
-    of_data_accounting << std::fixed << std::setprecision(1);
     // p50
     double exe_succ_lat = exe_succ_latencies[i].perc(0.5);
     double exe_fail_lat = exe_fail_latencies[i].perc(0.5);
@@ -648,7 +648,7 @@ void Handler::OutputResult(std::string bench_name, std::string system_name) {
     double val_fail_lat = validate_fail_latencies[i].perc(0.5)/10.0;
     double com_lat = commit_latencies[i].perc(0.5)/10.0;
     double abo_lat = abort_latencies[i].perc(0.5)/10.0;
-    of_data_accounting << "p50" << " " << exe_succ_lat << " " << exe_fail_lat << " " << val_succ_lat << " " << val_fail_lat << " " << com_lat << " " << abo_lat << std::endl;
+    of_data_accounting << std::fixed << std::setprecision(1) << "p50" << " " << exe_succ_lat << " " << exe_fail_lat << " " << val_succ_lat << " " << val_fail_lat << " " << com_lat << " " << abo_lat << std::endl;
 
     // p99
     exe_succ_lat = exe_succ_latencies[i].perc(0.99);
@@ -657,7 +657,7 @@ void Handler::OutputResult(std::string bench_name, std::string system_name) {
     val_fail_lat = validate_fail_latencies[i].perc(0.99)/10.0;
     com_lat = commit_latencies[i].perc(0.99)/10.0;
     abo_lat = abort_latencies[i].perc(0.99)/10.0;
-    of_data_accounting << "p99" << " " << exe_succ_lat << " " << exe_fail_lat << " " << val_succ_lat << " " << val_fail_lat << " " << com_lat << " " << abo_lat << std::endl;
+    of_data_accounting << std::fixed << std::setprecision(1) << "p99" << " " << exe_succ_lat << " " << exe_fail_lat << " " << val_succ_lat << " " << val_fail_lat << " " << com_lat << " " << abo_lat << std::endl;
 
     // avg
     exe_succ_lat = exe_succ_latencies[i].avg();
@@ -666,19 +666,21 @@ void Handler::OutputResult(std::string bench_name, std::string system_name) {
     val_fail_lat = validate_fail_latencies[i].avg()/10.0;
     com_lat = commit_latencies[i].avg()/10.0;
     abo_lat = abort_latencies[i].avg()/10.0;
-    of_data_accounting << "avg" << " " << exe_succ_lat << " " << exe_fail_lat << " " << val_succ_lat << " " << val_fail_lat << " " << com_lat << " " << abo_lat << std::endl;
+    of_data_accounting << std::fixed << std::setprecision(1) << "avg" << " " << exe_succ_lat << " " << exe_fail_lat << " " << val_succ_lat << " " << val_fail_lat << " " << com_lat << " " << abo_lat << std::endl;
   }
 
   Latency total_rw_hash_latency;
   Latency total_rw_val_latency;
   Latency total_ro_hash_latency;
   Latency total_ro_val_latency;
+  Latency total_poll_cq_latency;
   for (int i=0; i<tx_names.size(); i++)
   {
     total_rw_hash_latency+=rw_hash_latency[i];
     total_rw_val_latency+=rw_val_latency[i];
     total_ro_hash_latency+=ro_hash_latency[i];
     total_ro_val_latency+=ro_val_latency[i];
+    total_poll_cq_latency+=poll_cq_latency[i];
     of_data_accounting << tx_names[i] << "_rw_latency hash val" << std::endl;
     of_data_accounting << "p50" << " " << rw_hash_latency[i].perc(0.5)/10.0 << " " << rw_val_latency[i].perc(0.5)/10.0 << std::endl;
     of_data_accounting << "p99" << " " << rw_hash_latency[i].perc(0.99)/10.0 << " " << rw_val_latency[i].perc(0.99)/10.0 << std::endl;
@@ -698,6 +700,10 @@ void Handler::OutputResult(std::string bench_name, std::string system_name) {
   of_data_accounting << "p99" << " " << total_ro_hash_latency.perc(0.99)/10.0 << " " << total_ro_val_latency.perc(0.99)/10.0 << std::endl;
   of_data_accounting << "avg" << " " << total_ro_hash_latency.avg()/10.0 << " " << total_ro_val_latency.avg()/10.0 << std::endl;
 
+  of_data_accounting << "total_poll_cq " << total_poll_cq_latency.count() << "times latency(ns)" << std::endl;
+  of_data_accounting << std::fixed << std::setprecision(1) << "p50" << " " << total_poll_cq_latency.perc(0.5) << std::endl;
+  of_data_accounting << std::fixed << std::setprecision(1) << "p99" << " " << total_poll_cq_latency.perc(0.99) << std::endl;
+  of_data_accounting << std::fixed << std::setprecision(1) << "avg" << " " << total_poll_cq_latency.avg() << std::endl;
   of_data_accounting << std::endl;
 #endif
 

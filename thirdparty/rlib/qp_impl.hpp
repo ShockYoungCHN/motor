@@ -147,7 +147,7 @@ class RCQPImpl {
   RCQPImpl() = default;
   ~RCQPImpl() = default;
 
-  static const int RC_MAX_SEND_SIZE = 1024;
+  static const int RC_MAX_SEND_SIZE = 32;
   static const int RC_MAX_RECV_SIZE = 1; // Set to 1 because RC-based two sided verbs are not used
 
   template <RCConfig (* F)(void)>

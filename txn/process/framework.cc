@@ -117,16 +117,16 @@ bool TXN::ExeRO(coro_yield_t& yield) {
     auto hash_dur = std::chrono::duration_cast<std::chrono::nanoseconds>(coro_sched->val_ts - coro_sched->hash_ts).count();
     size_t hash_direct_cnt = pending_hash_read.size() + pending_direct_ro.size();
     if (hash_direct_cnt > 0) {
-      auto avg_hash_dur = hash_dur/hash_direct_cnt;
-      coro_sched->ro_hash_lat->update(avg_hash_dur/100, hash_direct_cnt);
+      // auto avg_hash_dur = hash_dur/hash_direct_cnt;
+      coro_sched->ro_hash_lat->update(hash_dur/100, 1);
     }
 
     size_t value_read_cnt = pending_value_read.size();
     // 2. how much time spent on read actual data
     auto val_dur = std::chrono::duration_cast<std::chrono::nanoseconds>(val_end_ts - coro_sched->val_ts).count();
     if (value_read_cnt > 0) {
-      auto avg_val_dur = val_dur/value_read_cnt;
-      coro_sched->ro_val_lat->update(avg_val_dur/100, value_read_cnt);
+      // auto avg_val_dur = val_dur/value_read_cnt;
+      coro_sched->ro_val_lat->update(val_dur/100, 1);
     }
     coro_sched->hash_ts = std::chrono::high_resolution_clock::from_time_t(0);
     coro_sched->val_ts = std::chrono::high_resolution_clock::from_time_t(0);
@@ -197,8 +197,8 @@ bool TXN::ExeRW(coro_yield_t& yield) {
     auto hash_dur = std::chrono::duration_cast<std::chrono::nanoseconds>(coro_sched->val_ts - coro_sched->hash_ts).count();
     size_t hash_direct_insert_cnt = pending_hash_read.size()+pending_direct_ro.size()+pending_cas_rw.size()+pending_insert_off_rw.size();
     if (hash_direct_insert_cnt > 0) {
-      auto avg_hash_dur = hash_dur / hash_direct_insert_cnt;
-      coro_sched->rw_hash_lat->update(avg_hash_dur/100, hash_direct_insert_cnt);
+      // auto avg_hash_dur = hash_dur / hash_direct_insert_cnt;
+      coro_sched->rw_hash_lat->update(hash_dur/100, 1);
     }
     // 2.1 how much time spent on read actual data for RO
     // 2.2 for RW
@@ -207,8 +207,8 @@ bool TXN::ExeRW(coro_yield_t& yield) {
     auto val_dur = std::chrono::duration_cast<std::chrono::nanoseconds>(val_end_ts - coro_sched->val_ts).count();
     size_t read_insert_cnt = pending_value_read.size()+pending_cvt_insert.size();
     if (read_insert_cnt > 0) {
-      auto avg_val_dur = val_dur / read_insert_cnt;
-      coro_sched->rw_val_lat->update(avg_val_dur/100, read_insert_cnt);
+      // auto avg_val_dur = val_dur / read_insert_cnt;
+      coro_sched->rw_val_lat->update(val_dur/100, 1);
     }
     coro_sched->hash_ts = std::chrono::high_resolution_clock::from_time_t(0);
     coro_sched->val_ts = std::chrono::high_resolution_clock::from_time_t(0);

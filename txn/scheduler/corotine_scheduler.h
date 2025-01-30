@@ -94,16 +94,20 @@ class CoroutineScheduler {
   Latency rw_val_latencies[7];
   Latency ro_hash_latencies[7];
   Latency ro_val_latencies[7];
+  Latency poll_cq_latencies[7];
+
   Latency* rw_hash_lat;
   Latency* rw_val_lat;
   Latency* ro_hash_lat;
   Latency* ro_val_lat;
+  Latency* poll_cq_lat;
 
   void switch_rtt_latencies(int tx_type){
     rw_hash_lat = &rw_hash_latencies[tx_type];
     rw_val_lat = &rw_val_latencies[tx_type];
     ro_hash_lat = &ro_hash_latencies[tx_type];
     ro_val_lat = &ro_val_latencies[tx_type];
+    poll_cq_lat = &poll_cq_latencies[tx_type];
   }
 #endif
 
@@ -327,10 +331,17 @@ void CoroutineScheduler::AppendCoroutine(Coroutine* coro) {
 
 ALWAYS_INLINE
 void CoroutineScheduler::PollCompletion(t_id_t tid) {
+#if DATA_ACCOUNTING
+  auto num_polled = 0;
+  auto ts_start = std::chrono::high_resolution_clock::now();
+#endif
   for (auto it = pending_qps.begin(); it != pending_qps.end();) {
     RCQP* qp = *it;
     struct ibv_wc wc;
     auto poll_result = qp->poll_send_completion(wc);  // The qp polls its own wc
+#if DATA_ACCOUNTING
+    num_polled++;
+#endif
     if (poll_result == 0) {
       it++;
       continue;
@@ -372,4 +383,10 @@ void CoroutineScheduler::PollCompletion(t_id_t tid) {
     }
     it = pending_qps.erase(it);
   }
+#if DATA_ACCOUNTING
+  if(num_polled == 0) return;
+  auto ts_end = std::chrono::high_resolution_clock::now();
+  poll_cq_lat->update(std::chrono::duration_cast<std::chrono::nanoseconds>(ts_end - ts_start).count()/num_polled,
+                      num_polled);
+#endif
 }
