@@ -339,7 +339,7 @@ DEBUG = False
 IB_COUNTERS = False
 EPOCH = 2
 
-combinations = generate_combinations(range(8, 33, 2), range(2, 3, 2))
+combinations = generate_combinations(range(8, 33, 1), range(2, 3, 2))
 backup_num = 2  # cannot be 0
 ibMonitor = IBCounterMonitor(device.device_name)
 
