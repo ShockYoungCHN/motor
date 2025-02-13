@@ -147,7 +147,9 @@ class RCQPImpl {
   RCQPImpl() = default;
   ~RCQPImpl() = default;
 
-  static const int RC_MAX_SEND_SIZE = 32;
+  // WR_MAX_SEND_SIZE is the same as RC_MAX_SEND_SIZE in Motor's impl; I seperated them for flexibility
+  static const int RC_MAX_SEND_SIZE = 128;
+  static const int WR_MAX_SEND_SIZE = 1024;
   static const int RC_MAX_RECV_SIZE = 1; // Set to 1 because RC-based two sided verbs are not used
 
   template <RCConfig (* F)(void)>
@@ -296,7 +298,7 @@ class RCQPImpl {
     qp_init_attr.recv_cq = cq;  // TODO, need seperate handling for two-sided over RC QP
     qp_init_attr.qp_type = IBV_QPT_RC;
 
-    qp_init_attr.cap.max_send_wr = RC_MAX_SEND_SIZE;
+    qp_init_attr.cap.max_send_wr = WR_MAX_SEND_SIZE;
     qp_init_attr.cap.max_recv_wr = RC_MAX_RECV_SIZE; /* Can be set to 1, if RC Two-sided is not required */
     qp_init_attr.cap.max_send_sge = 1;
     qp_init_attr.cap.max_recv_sge = 1;
@@ -329,7 +331,7 @@ class RCQPImpl {
                      IBV_EXP_QP_INIT_ATTR_PD | IBV_EXP_QP_INIT_ATTR_ATOMICS_ARG;
     attr.max_atomic_arg = 32;
 
-    attr.cap.max_send_wr = RC_MAX_SEND_SIZE;
+    attr.cap.max_send_wr = WR_MAX_SEND_SIZE;
     attr.cap.max_recv_wr = RC_MAX_RECV_SIZE;
     attr.cap.max_send_sge = 1;
     attr.cap.max_recv_sge = 1;
