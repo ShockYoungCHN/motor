@@ -103,8 +103,13 @@ def main() -> None:
 
     primary = normalize(args.primary)
     secondary = normalize(args.secondary)
+    disable_smt_mode = primary == "disable_smt" or secondary == "disable_smt"
 
-    cpus = build_cpu_order(primary, secondary, include_rest=not args.no_rest)
+    cpus = build_cpu_order(
+        primary,
+        secondary,
+        include_rest=not args.no_rest and not disable_smt_mode,
+    )
     update_affinity(cpus)
     print(f"Updated {CPU_AFFINITY} with order: {cpus}")
 

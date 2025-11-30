@@ -4,6 +4,7 @@
 #pragma once
 
 #include <list>
+#include <errno.h>
 
 #include "base/common.h"
 #include "rlib/logging.hpp"
@@ -157,6 +158,14 @@ void CoroutineScheduler::RDMABatch(coro_id_t coro_id, RCQP* qp, ibv_send_wr* sen
   send_sr[piggyback_num].wr_id = coro_id;
   auto rc = qp->post_batch(send_sr, bad_sr_addr);
   if (rc != SUCC) {
+    auto bad_wr = send_sr[piggyback_num];
+    RDMA_LOG(ERROR) << "client: post batch detail: rc=" << rc
+                    << " errno=" << errno
+                    << " qp_num=" << (qp->qp_ ? qp->qp_->qp_num : -1)
+                    << " opcode=" << bad_wr.opcode
+                    << " num_sge=" << bad_wr.num_sge
+                    << " send_flags=" << bad_wr.send_flags
+                    << " tid=" << t_id << " coroid=" << coro_id;
     RDMA_LOG(FATAL) << "client: post batch fail. rc=" << rc << ", tid = " << t_id << ", coroid = " << coro_id;
   }
   AddPendingQP(coro_id, qp);

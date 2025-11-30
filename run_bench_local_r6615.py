@@ -1,11 +1,25 @@
 import json
+import os
 import re
 import pexpect
-import time, os
 import subprocess
+import time
 from threading import Thread
+
 from device import find_device_index
 from ib_counters import IBCounterMonitor
+
+def enforce_rc_max_send_size(file_path: str, value: int) -> None:
+    """Set the RC_MAX_SEND_SIZE constant so build stays in sync with the script."""
+    pattern = r"^\s*static const int RC_MAX_SEND_SIZE = \d+;"
+    replacement = f"  static const int RC_MAX_SEND_SIZE = {value};"
+    with open(file_path, 'r') as fh:
+        content = fh.read()
+    new_content, count = re.subn(pattern, replacement, content, count=1, flags=re.MULTILINE)
+    if count == 0:
+        raise RuntimeError(f"failed to find RC_MAX_SEND_SIZE in {file_path}")
+    with open(file_path, 'w') as fh:
+        fh.write(new_content)
 
 ######################################### utils ####################################################
 packages = {
@@ -188,8 +202,7 @@ def configure_workload(wl_config_path, wl):
 def start_memory_pool(child):
     try:
         cd_command = f'cd ~/{txn}/build/memory_pool/server' if txn == "ford" else f'cd ~/{txn}/build/memory_node/server'
-        cpu_bind = get_cpu_bind_arg()
-        start_command = f'numactl {MEM_POLICY_ARG}--cpunodebind={cpu_bind} ./zm_mem_pool' if txn == "ford" else f'numactl {MEM_POLICY_ARG}--cpunodebind={cpu_bind} ./motor_mempool'
+        start_command = f'numactl --preferred=1 ./zm_mem_pool' if txn == "ford" else f'numactl --preferred=1 ./motor_mempool'
 
         child.sendline(cd_command)
         child.expect_exact('$')
@@ -273,9 +286,8 @@ def run_workload_in_cluster(compute_child, memory_pool_children, txn, workload, 
         # start to run in compute node
         for j, (threads, coroutines) in enumerate(thr_coro_combinations):
             # construct the command
-            cpu_bind = get_cpu_bind_arg(threads)
-            command = f"numactl {MEM_POLICY_ARG}--cpunodebind={cpu_bind} ./run {workload} {txn} {threads} {coroutines}" if txn == "ford" \
-                else f"numactl {MEM_POLICY_ARG}--cpunodebind={cpu_bind} ./run {workload} {threads} {coroutines} SR"
+            command = f"numactl --preferred=1 ./run {workload} {txn} {threads} {coroutines}" if txn == "ford" \
+                else f"numactl --preferred=1 ./run {workload} {threads} {coroutines} SR"
             if txn == "ford":
                 cd_and_run = f'cd {proj_root}/build/compute_pool/run && {command}'
             elif txn == "motor":
@@ -331,130 +343,25 @@ proj_cn_config = f"{proj_root}/config/cn_config.json"
 proj_mn_config = f"{proj_root}/config/mn_config.json"
 wl_config = lambda wl: f"{proj_root}/config/{wl.lower()}_config.json"
 proj_flags = f"{proj_root}/txn/flags.h"
-MEM_GB = 96  # 192GB is default, however 96GB is much faster since 192GB cannot fit in one NUMA
+MEM_GB = 96  # 192GB is default, however 96GB is much faster and enough for all the workload
+RC_MAX_SEND_SIZE = 512  # ensure the client workload matches the new RC send depth
 # Determine the most suitable NUMA nodes for CPU and memory binding.
-def parse_numa_topology():
-    try:
-        output = subprocess.check_output(["numactl", "--hardware"], universal_newlines=True)
-    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
-        print(f"Failed to inspect local NUMA topology ({exc}). Falling back to defaults.")
-        return {}
-
-    size_pattern = re.compile(r"node (\d+) size:\s+(\d+) MB")
-    free_pattern = re.compile(r"node (\d+) free:\s+(\d+) MB")
-    nodes = {}
-
-    for line in output.splitlines():
-        size_match = size_pattern.match(line)
-        free_match = free_pattern.match(line)
-        if size_match:
-            node_id = int(size_match.group(1))
-            nodes.setdefault(node_id, {})["size"] = int(size_match.group(2))
-        if free_match:
-            node_id = int(free_match.group(1))
-            nodes.setdefault(node_id, {})["free"] = int(free_match.group(2))
-    return nodes
-
-
-def read_nic_numa_node(device_name):
-    if not device_name:
-        return None
-    sysfs_path = f"/sys/class/infiniband/{device_name}/device/numa_node"
-    try:
-        with open(sysfs_path, 'r') as file:
-            value = int(file.read().strip())
-            return value if value >= 0 else None
-    except (FileNotFoundError, ValueError):
-        return None
-
-
-def pick_two_nodes(preferred_node=None):
-    nodes = parse_numa_topology()
-    node_ids = sorted(nodes.keys()) if nodes else []
-
-    selected = []
-    if preferred_node is not None:
-        selected.append(preferred_node)
-
-    for node_id in node_ids:
-        if node_id not in selected:
-            selected.append(node_id)
-        if len(selected) == 2:
-            break
-
-    if len(selected) < 2:
-        for node_id in range(4):  # simple fallback through first few IDs
-            if node_id not in selected:
-                selected.append(node_id)
-            if len(selected) == 2:
-                break
-
-    return selected[:2] if selected else ([preferred_node] if preferred_node is not None else [0])
-
-
-def parse_env_nodes(var_name):
-    value = os.environ.get(var_name)
-    if value is None:
-        return None
-    nodes = []
-    for token in value.split(','):
-        token = token.strip()
-        if not token:
-            continue
-        nodes.append(int(token))
-    return nodes if nodes else None
-
-
 device = find_device_index("192.168.1.0", "255.255.255.0")
-nic_numa_node = read_nic_numa_node(device.device_name)
-
-env_mem_nodes = parse_env_nodes("MOTOR_MEM_NUMA")
-env_cpu_nodes = parse_env_nodes("MOTOR_CPU_NUMA")
-
-if env_mem_nodes:
-    mem_nodes = env_mem_nodes
-else:
-    mem_nodes = pick_two_nodes(preferred_node=nic_numa_node)
-
-if not mem_nodes:
-    mem_nodes = [nic_numa_node if nic_numa_node is not None else 0]
-
-preferred_mem_node = mem_nodes[0]
-MEM_POLICY_ARG = f"--preferred={preferred_mem_node} "
-
-if not env_cpu_nodes:
-    base_cpu_node = nic_numa_node if nic_numa_node is not None else preferred_mem_node
-    CPU_BASE_BIND = str(base_cpu_node)
-
-
-def get_cpu_bind_arg(thread_count=None):
-    if env_cpu_nodes:
-        return ','.join(str(node) for node in env_cpu_nodes)
-
-    if thread_count is None:
-        return CPU_BASE_BIND
-
-    if thread_count <= 16:
-        return CPU_BASE_BIND
-
-    if thread_count > 32:
-        return ','.join(str(node) for node in mem_nodes)
-
-    return CPU_BASE_BIND
 
 delta_size = 50 # default 50MB
 ATTEMPTS = 1000_000 # default 1000_000
-workloads = ["tpcc", "tatp", "smallbank"]
+workloads = ["tpcc", "smallbank", "tatp"] # "tpcc", "smallbank"
 CORE_DUMP = False
 DEBUG = False
 IB_COUNTERS = False
-EPOCH = 1
+EPOCH = 3
 
-combinations = generate_combinations(range(8, 33, 8), range(2, 3, 2))
+combinations = generate_combinations(range(8, 31, 1), range(2, 3, 2))
 backup_num = 2  # cannot be 0
 ibMonitor = IBCounterMonitor(device.device_name)
 
 if __name__ == '__main__':
+    enforce_rc_max_send_size(f"{proj_root}/thirdparty/rlib/qp_impl.hpp", RC_MAX_SEND_SIZE)
     generate_ssh_config(username, private_key_path, '/users/samuraiy/.ssh/config')
 
     memory_pool_children = [create_ssh_session(host, username, private_key_path) for host in memory_pool_hosts]
@@ -470,11 +377,13 @@ if __name__ == '__main__':
     # start logging & core dump
     for child in memory_pool_children:
         child.sendline('script -f motor_mn.log')
+        child.sendline('ulimit -l unlimited')
         if CORE_DUMP:
             child.sendline('ulimit -c unlimited')
         else:
             child.sendline('ulimit -c 0')
     compute_child.sendline('script -f motor_cn.log')
+    compute_child.sendline('ulimit -l unlimited')
     if CORE_DUMP:
         compute_child.sendline('ulimit -c unlimited')
     else:
