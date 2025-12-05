@@ -377,11 +377,12 @@ void Handler::OutputResult(std::string bench_name, std::string system_name) {
 
   double avg_median = total_median / thread_num;
   double avg_tail = total_tail / thread_num;
+  double avg_latency = std::accumulate(avg_lat.begin(), avg_lat.end(), 0.0) / avg_lat.size();
 
   std::sort(medianlat_vec.begin(), medianlat_vec.end());
   std::sort(taillat_vec.begin(), taillat_vec.end());
 
-  of << system_name << " " << total_attemp_tp / 1000 << " " << total_tp / 1000 << " " << avg_median << " " << avg_tail << std::endl;
+  of << system_name << " " << total_attemp_tp / 1000 << " " << total_tp / 1000 << " " << avg_median << " " << avg_tail << " " << avg_latency << std::endl;
   of.close();
 
   std::ofstream of_abort_rate;
@@ -434,9 +435,7 @@ void Handler::OutputResult(std::string bench_name, std::string system_name) {
   of_abort_rate << std::endl;
   of_abort_rate.close();
 
-  // todo: the avg lat of committed txn is not recorded to res_file
-  auto avg = std::accumulate(avg_lat.begin(), avg_lat.end(), 0.0) / avg_lat.size();
-  std::cout << system_name << " " << total_attemp_tp / 1000 << " " << total_tp / 1000 << " " << avg_median << " " << avg_tail << " " << avg << std::endl;
+  std::cout << system_name << " " << total_attemp_tp / 1000 << " " << total_tp / 1000 << " " << avg_median << " " << avg_tail << " " << avg_latency << std::endl;
 
   double total_delta_usage_MB = 0;
   for (int i = 0; i < delta_usage.size(); i++) {

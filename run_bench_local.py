@@ -281,7 +281,7 @@ def run_workload_in_cluster(compute_child, memory_pool_children, txn, workload, 
                 raise Exception("Invalid transaction type")
 
             print(f"Running command on compute node: {command}")
-            if IB_COUNTERS:
+            if IB_COUNTERS or PACKET_EFFICIENCY:
                 ibMonitor.start()
 
             run_command(compute_child, cd_and_run)
@@ -291,6 +291,23 @@ def run_workload_in_cluster(compute_child, memory_pool_children, txn, workload, 
                 hw_counters_diff, counters_diff = ibMonitor.get_counters_diff()
                 print(f"HW Counters diff: {hw_counters_diff}")
                 print(f"Counters diff: {counters_diff}")
+
+            if PACKET_EFFICIENCY:
+                if not IB_COUNTERS: # Avoid calling end() twice if both are true
+                    ibMonitor.end()
+                
+                _, counters_diff = ibMonitor.get_counters_diff()
+                
+                # Extract specific counters
+                # Note: keys in counters_diff match filenames in /sys/class/infiniband/<dev>/ports/1/counters/
+                delta_tx = int(counters_diff.get('port_xmit_packets', 0))
+                delta_rx = int(counters_diff.get('port_rcv_packets', 0))
+                total_wire_packets = delta_tx + delta_rx
+                
+                print(f"Delta_TX: {delta_tx}")
+                print(f"Delta_RX: {delta_rx}")
+                print(f"Total_Wire_Packets: {total_wire_packets}")
+
             print(f"(thread, coroutine): ({threads}, {coroutines}) finished")
 
             # only refresh memory pool if it's not the last epoch and last combination
@@ -337,6 +354,7 @@ workloads = ["tpcc", "tatp", "smallbank"]
 CORE_DUMP = False
 DEBUG = False
 IB_COUNTERS = False
+PACKET_EFFICIENCY = True
 EPOCH = 2
 
 combinations = generate_combinations(range(8, 33, 1), range(2, 3, 2))
